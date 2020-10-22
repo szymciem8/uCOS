@@ -61,11 +61,31 @@ void display(void *data);
 //                                  MAIN
 //------------------------------------------------------------------------------
 void main(void){
+  INT8U memerr;
+  PC_DispClrScr(DISP_FGND_WHITE + DISP_BGND_BLACK);      /* Clear the screen                         */
+  OSInit();                                              /* Initialize uC/OS-II                      */
+  PC_DOSSaveReturn();                                    /* Save environment to return to DOS        */
 
 }
 
 void TaskStart(void *pdata){
+  int i;
+#if OS_CRITICAL_METHOD == 3                                /* Allocate storage for CPU status register */
+    OS_CPU_SR  cpu_sr;
+#endif
 
+    unsigned char tasknrs[5];
+
+    pdata = pdata;                                         /* Prevent compiler warning                 */
+
+    TaskStartDispInit();                                   /* Initialize the display                   */
+
+    OS_ENTER_CRITICAL();
+    PC_VectSet(0x08, OSTickISR);                           /* Install uC/OS-II's clock tick ISR        */
+    PC_SetTickRate(OS_TICKS_PER_SEC);                      /* Reprogram tick rate                      */
+    OS_EXIT_CRITICAL();
+
+    OSStatInit();    
 }
 
 static  void  TaskStartDispInit (void)
