@@ -1,22 +1,16 @@
-/*
+*
 ------------------------------SYSTEMY OPERACYJNE--------------------------------
-
 Program polegający, który ma za zadnie obciążać wieloma procesami (task)
 system operacyjny.
-
 Politechnika Śląska
 Wydział Automatyki, Elektroniki i Informatyki
 Laboratorium RTOS 2,3
-
 Autorzy: Szymon Ciemała, Jakub Kaniowski
-
 OPIS
 5 zadań -> skrzynka pocztowa Mbox
 5 zadań -> kolejaka
 5 zadań -> semafor
-
 W sumie 15 zdań
-
 */
 
 //LIBRARIES
@@ -46,6 +40,20 @@ struct {
   INT8U input_iterator;
 } task_state;
 
+struct taskToolbox
+{
+  unsigned char line; //linia wpisywania
+  unsigned char offset;
+  char str[81]; //ilosc pustych lini w displayu
+  char size; //wielkość "Czyszczenia" konsolki
+  INT8U bcolor; //bckgr kolor
+  INT8U fcolor;
+}
+
+//Dla tasków od 6-10
+OS_EVENT *Queue;
+void *QueueTab[8];
+
 //------------------------------------------------------------------------------
 //                          PROTOTYPES OF FUNCTIONS
 //------------------------------------------------------------------------------
@@ -54,8 +62,11 @@ void  TaskStart(void *data);
 static  void  TaskStartDispInit(void);
 static  void  TaskStartDisp(void);
 
-void get_key(void *data);
-void display(void *data);
+void read_key(void *data);    //obsluga klawiatury
+void display(void *data);     //obsluga ekranu
+void edit(void* data);
+
+void queTask(void *data);     //kolejka
 
 //------------------------------------------------------------------------------
 //                                  MAIN
@@ -85,7 +96,7 @@ void TaskStart(void *pdata){
     PC_SetTickRate(OS_TICKS_PER_SEC);                      /* Reprogram tick rate                      */
     OS_EXIT_CRITICAL();
 
-    OSStatInit();    
+    OSStatInit();
 }
 
 static  void  TaskStartDispInit (void)
@@ -179,5 +190,24 @@ void read_key(void *pdata){
 
 void display(){
 
+  INT8U display_error;
+  data = data;
+  struct toolBox *tb;
+  char clear[64] = "                                                               \0";
+
+  for(;;)
+  {
+      tb = OSMboxPend(PrintM, 1, &err); //OSMBoxPend zwraca kody bloedow - jesli wiadomosc dostarczona to OS_NO_ERROR
+
+      //zatem:
+      if(err = OS_NO_ERROR)
+      {
+        clear[tb->size]='\0'; //czyscimy linie
+        PC_DispStr(tb->offset,tb->line,clear,DISP_FGND_BLACK + tb->color);
+        clear[tb->size]= ' ';
+        PC_DispStr(tb->offset,tb->line,tb->str,tb->fcolor + tb->color);
+        OSMemPut(dispMem,tb);
+      }
+  }
 
 }
