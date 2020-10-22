@@ -1,4 +1,4 @@
-*
+/*
 ------------------------------SYSTEMY OPERACYJNE--------------------------------
 Program polegający, który ma za zadnie obciążać wieloma procesami (task)
 system operacyjny.
@@ -22,51 +22,66 @@ W sumie 15 zdań
 
 #define TASK_STACK_SIZE 512
 #define NUMBER_OF_TASKS 21
+#define BUFFOR_SIZE 11
+
+#define DONE 0
+
+#define KEYBOARD_PRIO 1
+#define DISPLAY_PRIO 2
+
+#define WRITE_PRIO 4
+
 
 //------------------------------------------------------------------------------
 //                              GLOBAL VARIABLES
 //------------------------------------------------------------------------------
 
 //STACKS
-OS_STK TaskStk[N_TASKS][TASK_STK_SIZE];
-OS_STK TaskStartStk[TASK_STK_SIZE];
+OS_STK TaskStk[NUMBER_OF_TASKS][TASK_STACK_SIZE];
+OS_STK TaskStartStk[TASK_STACK_SIZE];
 
-OS_MEM *input_memory;   //Wskaznik danego bloku pamieci
+OS_MEM *input_memory;		//Wskaznik danego bloku pamieci
+OS_MEM *display_memory;
 OS_EVENT *input_queue;
+OS_EVENT *print_memory;
+void *input_queue_tab[32];
 
-struct {
-  INT8U task_number;
-  INT8U val_loop;
-  INT8U input_iterator;
-} task_state;
+//QUEUES
+OS_EVENT *queue;
 
-struct taskToolbox
-{
-  unsigned char line; //linia wpisywania
-  unsigned char offset;
-  char str[81]; //ilosc pustych lini w displayu
-  char size; //wielkość "Czyszczenia" konsolki
-  INT8U bcolor; //bckgr kolor
-  INT8U fcolor;
-}
+//Struktura przechowująca status danego tasku
+struct task_state{
+  char task_number;
+  INT32U val_loop;
+  INT32U load;
+  INT32U counter;
+  INT32U error;
+};
 
-//Dla tasków od 6-10
-OS_EVENT *Queue;
-void *QueueTab[8];
+//Struktura pozwalajaca skrocic funkcje display string
+struct display_options{
+  unsigned char line;		//linia wpisywania
+  unsigned char offset;		//Przesuniecie
+  char str[81]; 			//ilosc pustych lini w displayu
+  char size; 				//wielkość "Czyszczenia" konsolki
+  INT8U bcolor; 			//kolor tla
+  INT8U fcolor;				//kolor czcionki
+};
 
 //------------------------------------------------------------------------------
 //                          PROTOTYPES OF FUNCTIONS
 //------------------------------------------------------------------------------
-void  TaskStart(void *data);
+void TaskStart(void *pdata);
 
 static  void  TaskStartDispInit(void);
 static  void  TaskStartDisp(void);
 
 void read_key(void *data);    //obsluga klawiatury
+void write_text(void *data); 	//
 void display(void *data);     //obsluga ekranu
 void edit(void* data);
 
-void queTask(void *data);     //kolejka
+//void queTask(void *data);     //kolejka
 
 //------------------------------------------------------------------------------
 //                                  MAIN
@@ -76,7 +91,13 @@ void main(void){
   PC_DispClrScr(DISP_FGND_WHITE + DISP_BGND_BLACK);      /* Clear the screen                         */
   OSInit();                                              /* Initialize uC/OS-II                      */
   PC_DOSSaveReturn();                                    /* Save environment to return to DOS        */
+  PC_VectSet(uCOS, OSCtxSw);
 
+  input_queue = OSQCreate(&input_queue_tab[0], 32);		//Przechowuje w kolejce dane wejściowe
+  print_memory = OSMboxCreate(NULL);
+
+  OSTaskCreate(TaskStart, (void*)0, &TaskStartStk[TASK_STACK_SIZE - 1], 0);
+  OSStart();
 }
 
 void TaskStart(void *pdata){
@@ -97,6 +118,16 @@ void TaskStart(void *pdata){
     OS_EXIT_CRITICAL();
 
     OSStatInit();
+
+	OSTaskCreate(read_key, 		NULL, 	&TaskStk[0][TASK_STACK_SIZE - 1], 	KEYBOARD_PRIO);
+	OSTaskCreate(display, 		NULL, 	&TaskStk[1][TASK_STACK_SIZE - 1], 	DISPLAY_PRIO);
+	OSTaskCreate(write_text, 	NULL, 	&TaskStk[1][TASK_STACK_SIZE - 1], 	WRITE_PRIO);
+
+	for(;;){
+		TaskStartDisp();
+		OSCtxSwCtr = 0;
+		OSTimeDlyHMSM(0, 0, 1, 0);
+	}
 }
 
 static  void  TaskStartDispInit (void)
@@ -163,6 +194,8 @@ static  void  TaskStartDisp (void)
         case 3:
              PC_DispStr(71, 22, "80387 FPU", DISP_FGND_YELLOW + DISP_BGND_BLUE);
              break;
+    }
+}
 
 //------------------------------------------------------------------------------
 //                                  READ_KEY
@@ -172,42 +205,93 @@ void read_key(void *pdata){
   INT8U memory_error;   //blad pamiecie
   INT16S *msg;          //wiadomosc
 
-  pdata = pdata;        //Dbamy o to, zeby nie wystapil blad kompilatora
+  pdata = pdata;        //Dbamy o to, zeby nie wystapil blad kompilatora, nie można inicjować zmiennych
 
-  for(;;)
-  {
+  while(1){
     while (PC_GetKey(&key)){ //Pobieramy przycisk
-      msg = OSMemGet(input_memory, &memory_error);  //Funkcja pobiera blok pamięci
-      if (memory_error == OS_NO_ERR){
+      msg = OSMemGet(input_memory, &memory_error);	//Funkcja pobiera adres pustej komórki pamięci
+      if (memory_error == OS_NO_ERR){				//W wypadku kiedy nie ma żadnego błędu możemy kontynuować
         *msg = key;
-        OSQPost(input_queue, (void*)msg); //Przesylamy wskaznik do kolejki
-      }else
-        post( 1, MEMERR);
+	  OSQPost(input_queue, (void*)msg);}			//Przesylamy wskaznik do kolejki
     }
-    OSTimeDly(6);   //Oczekujemy 6 cykli zegarowych
+    OSTimeDly(6);   //Oczekujemy 6 cykli zegarowych -> 30 ms
   }
 }
 
-void display(){
+void display(void *data){
 
   INT8U display_error;
-  data = data;
-  struct toolBox *tb;
+  INT8U pend_error;
+  struct display_options *disp_opts;
   char clear[64] = "                                                               \0";
+
+  data = data;
 
   for(;;)
   {
-      tb = OSMboxPend(PrintM, 1, &err); //OSMBoxPend zwraca kody bloedow - jesli wiadomosc dostarczona to OS_NO_ERROR
+      disp_opts = OSMboxPend(print_memory, 1, &pend_error); //OSMBoxPend zwraca kody bloedow - jesli wiadomosc dostarczona to OS_NO_ERROR
 
       //zatem:
-      if(err = OS_NO_ERROR)
+      if(pend_error == 0) //OS_NO_ERROR
       {
-        clear[tb->size]='\0'; //czyscimy linie
-        PC_DispStr(tb->offset,tb->line,clear,DISP_FGND_BLACK + tb->color);
-        clear[tb->size]= ' ';
-        PC_DispStr(tb->offset,tb->line,tb->str,tb->fcolor + tb->color);
-        OSMemPut(dispMem,tb);
+        clear[disp_opts->size]='\0'; //czyscimy linie
+        PC_DispStr(disp_opts->offset,	disp_opts->line,	clear,	disp_opts->fcolor + disp_opts->bcolor);
+        clear[disp_opts->size]= ' ';
+        PC_DispStr(disp_opts->offset,	disp_opts->line,	disp_opts->str,	disp_opts->fcolor + disp_opts->bcolor);
+        OSMemPut(display_memory, disp_opts);
       }
   }
+}
+/*
+void q_loaded_task(void *data){
+	struct task_state stats;
+	INT32U *temporary;
+	int temporary_val;
+	stats.task_number *(char *) data;
+	for(stats.load=100, stats.counter=1; ; stats.counter++){
+
+
+
+}
+*/
+void write_text(void *pdata){
+	INT8U pend_error, memory_error;		//ERRORS
+	INT8U char_counter;
+	INT32U *msg;
+	void *received_data;
+	char key;
+	INT16S temp_key;
+	char buffor[BUFFOR_SIZE];
+	struct display_options *disp_opts;
+
+	pdata = pdata;
+
+	buffor[BUFFOR_SIZE - 1] = '\0';		//Koniec buffer jest pusty
+
+	while(1){
+		received_data = OSQPend(input_queue, 0, &pend_error);
+		//printf("%d", pend_error);
+		temp_key = *(INT16S*) received_data;
+		OSMemPut(input_memory, received_data);
+		key = (char)temp_key;
+
+		switch(key){
+			case 0x1B:
+				PC_DOSReturn();
+				break;
+			default:
+				break;
+		}
+
+		disp_opts = OSMemGet(display_memory, &memory_error);
+		disp_opts -> line = 4;
+		disp_opts -> offset = 0;
+		strcpy(disp_opts -> str, buffor);
+		disp_opts -> size = BUFFOR_SIZE;
+		disp_opts -> fcolor = DISP_FGND_BLACK;
+		disp_opts -> bcolor = DISP_BGND_LIGHT_GRAY;
+		OSMboxPost(print_memory, disp_opts);
+	}
+
 
 }
