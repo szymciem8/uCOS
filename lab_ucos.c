@@ -9,6 +9,14 @@ Wydział Automatyki, Elektroniki i Informatyki
 Laboratorium RTOS 2,3
 
 Autorzy: Szymon Ciemała, Jakub Kaniowski
+
+OPIS
+5 zadań -> skrzynka pocztowa Mbox
+5 zadań -> kolejaka
+5 zadań -> semafor
+
+W sumie 15 zdań
+
 */
 
 //LIBRARIES
@@ -24,13 +32,30 @@ Autorzy: Szymon Ciemała, Jakub Kaniowski
 //------------------------------------------------------------------------------
 //                              GLOBAL VARIABLES
 //------------------------------------------------------------------------------
+
+//STACKS
 OS_STK TaskStk[N_TASKS][TASK_STK_SIZE];
 OS_STK TaskStartStk[TASK_STK_SIZE];
+
+OS_MEM *input_memory;   //Wskaznik danego bloku pamieci
+OS_EVENT *input_queue;
+
+struct {
+  INT8U task_number;
+  INT8U val_loop;
+  INT8U input_iterator;
+} task_state;
 
 //------------------------------------------------------------------------------
 //                          PROTOTYPES OF FUNCTIONS
 //------------------------------------------------------------------------------
+void  TaskStart(void *data);
 
+static  void  TaskStartDispInit(void);
+static  void  TaskStartDisp(void);
+
+void get_key(void *data);
+void display(void *data);
 
 //------------------------------------------------------------------------------
 //                                  MAIN
@@ -72,7 +97,6 @@ static  void  TaskStartDispInit (void)
     PC_DispStr( 0, 24, "                            <-PRESS 'ESC' TO QUIT->                             ", DISP_FGND_WHITE + DISP_BGND_RED);
 }
 
-
 static  void  TaskStartDisp (void)
 {
     char   s[80];
@@ -109,36 +133,31 @@ static  void  TaskStartDisp (void)
              PC_DispStr(71, 22, "80387 FPU", DISP_FGND_YELLOW + DISP_BGND_BLUE);
              break;
 
-
+//------------------------------------------------------------------------------
+//                                  READ_KEY
+//------------------------------------------------------------------------------
 void read_key(void *pdata){
-  INT16S key;
-  INT8U memerr;
-  INT16S *msg;
+  INT16S key;           //przycisk
+  INT8U memory_error;   //blad pamiecie
+  INT16S *msg;          //wiadomosc
 
-  pdata = pdata;
+  pdata = pdata;        //Dbamy o to, zeby nie wystapil blad kompilatora
 
   for(;;)
   {
-    while (PC_GetKey(&key))
-    {
-      msg = OSMemGet(inMem,&memerr);
-      if (memerr == OS_NO_ERR)
-      {
-      *msg = key;
-      OSQPost(inQ,(void*)msg);
-      }
-      else post( 1, MEMERR);
+    while (PC_GetKey(&key)){ //Pobieramy przycisk
+      msg = OSMemGet(input_memory, &memory_error);  //Funkcja pobiera blok pamięci
+      if (memory_error == OS_NO_ERR){
+        *msg = key;
+        OSQPost(input_queue, (void*)msg); //Przesylamy wskaznik do kolejki
+      }else
+        post( 1, MEMERR);
     }
-    OSTimeDly(6);
+    OSTimeDly(6);   //Oczekujemy 6 cykli zegarowych
   }
 }
 
 void display(){
-
-
-}
-
-void read_key(){
 
 
 }
