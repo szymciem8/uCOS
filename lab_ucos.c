@@ -41,7 +41,11 @@ OS_STK TaskStk[NUMBER_OF_TASKS][TASK_STACK_SIZE];
 OS_STK TaskStartStk[TASK_STACK_SIZE];
 
 OS_MEM *input_memory;		//Wskaznik danego bloku pamieci
+INT32U input_memory_block[32][4];
+
 OS_MEM *display_memory;
+INT32U *display_memory_block;
+
 OS_EVENT *input_queue;
 OS_EVENT *print_memory;
 void *input_queue_tab[32];
@@ -87,7 +91,7 @@ void edit(void* data);
 //                                  MAIN
 //------------------------------------------------------------------------------
 void main(void){
-  INT8U memerr;
+  INT8U memory_error;
   PC_DispClrScr(DISP_FGND_WHITE + DISP_BGND_BLACK);      /* Clear the screen                         */
   OSInit();                                              /* Initialize uC/OS-II                      */
   PC_DOSSaveReturn();                                    /* Save environment to return to DOS        */
@@ -96,6 +100,9 @@ void main(void){
   input_queue = OSQCreate(&input_queue_tab[0], 32);		//Przechowuje w kolejce dane wejściowe
   print_memory = OSMboxCreate(NULL);
 
+  display_memory = OSMemCreate(display_memory_block, 32, sizeof(struct display_options), &memory_error);
+
+  input_memory = OSMemCreate(input_memory_block, 32, 4, &memory_error);
   OSTaskCreate(TaskStart, (void*)0, &TaskStartStk[TASK_STACK_SIZE - 1], 0);
   OSStart();
 }
@@ -121,7 +128,7 @@ void TaskStart(void *pdata){
 
 	OSTaskCreate(read_key, 		NULL, 	&TaskStk[0][TASK_STACK_SIZE - 1], 	KEYBOARD_PRIO);
 	OSTaskCreate(display, 		NULL, 	&TaskStk[1][TASK_STACK_SIZE - 1], 	DISPLAY_PRIO);
-	OSTaskCreate(write_text, 	NULL, 	&TaskStk[1][TASK_STACK_SIZE - 1], 	WRITE_PRIO);
+	OSTaskCreate(write_text, 	NULL, 	&TaskStk[2][TASK_STACK_SIZE - 1], 	WRITE_PRIO);
 
 	for(;;){
 		TaskStartDisp();
@@ -208,11 +215,20 @@ void read_key(void *pdata){
   pdata = pdata;        //Dbamy o to, zeby nie wystapil blad kompilatora, nie można inicjować zmiennych
 
   while(1){
-    while (PC_GetKey(&key)){ //Pobieramy przycisk
+    if(PC_GetKey(&key) == TRUE){ //Pobieramy przycisk
       msg = OSMemGet(input_memory, &memory_error);	//Funkcja pobiera adres pustej komórki pamięci
-      if (memory_error == OS_NO_ERR){				//W wypadku kiedy nie ma żadnego błędu możemy kontynuować
-        *msg = key;
-	  OSQPost(input_queue, (void*)msg);}			//Przesylamy wskaznik do kolejki
+		if(memory_error == OS_NO_ERR){				//W wypadku kiedy nie ma żadnego błędu możemy kontynuować
+			*msg = key;
+		}else{
+			if(memory_error == OS_MEM_NO_FREE_BLKS){
+				PC_DispStr(70, 4, "Cokolwiek1", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			}
+			if(memory_error == OS_MEM_INVALID_PMEM){
+				PC_DispStr(70, 5, "Cokolwiek2", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			}
+		}
+
+	  OSQPost(input_queue, msg);			//Przesylamy wskaznik do kolejki
     }
     OSTimeDly(6);   //Oczekujemy 6 cykli zegarowych -> 30 ms
   }
@@ -220,8 +236,7 @@ void read_key(void *pdata){
 
 void display(void *data){
 
-  INT8U display_error;
-  INT8U pend_error;
+  INT8U display_error, pend_error;
   struct display_options *disp_opts;
   char clear[64] = "                                                               \0";
 
@@ -229,17 +244,25 @@ void display(void *data){
 
   for(;;)
   {
-      disp_opts = OSMboxPend(print_memory, 1, &pend_error); //OSMBoxPend zwraca kody bloedow - jesli wiadomosc dostarczona to OS_NO_ERROR
+      disp_opts = OSMboxPend(print_memory, 0, &pend_error); //OSMBoxPend zwraca kody bloedow - jesli wiadomosc dostarczona to OS_NO_ERROR
 
       //zatem:
-      if(pend_error == 0) //OS_NO_ERROR
+      if(pend_error == OS_NO_ERR) //OS_NO_ERROR
       {
         clear[disp_opts->size]='\0'; //czyscimy linie
         PC_DispStr(disp_opts->offset,	disp_opts->line,	clear,	disp_opts->fcolor + disp_opts->bcolor);
         clear[disp_opts->size]= ' ';
         PC_DispStr(disp_opts->offset,	disp_opts->line,	disp_opts->str,	disp_opts->fcolor + disp_opts->bcolor);
         OSMemPut(display_memory, disp_opts);
+		PC_DispStr(70, 5, "test_display", DISP_FGND_YELLOW + DISP_BGND_BLUE);
       }
+	  else{//Napotkalismy problem z TIMEOUT
+		  if (pend_error == OS_TIMEOUT) PC_DispStr(70, 5, "test_display2", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+		  else if (pend_error == OS_ERR_EVENT_TYPE) 	PC_DispStr(70, 5, "event", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+		  else if (pend_error == OS_ERR_PEND_ISR) 		PC_DispStr(70, 5, "isr", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+		  else if (pend_error == OS_ERR_PEVENT_NULL) 	PC_DispStr(70, 5, "pevent", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+
+	  }
   }
 }
 /*
@@ -258,8 +281,8 @@ void write_text(void *pdata){
 	INT8U pend_error, memory_error;		//ERRORS
 	INT8U char_counter;
 	INT32U *msg;
-	void *received_data;
-	char key;
+	INT16S *received_data;
+	INT16S key;
 	INT16S temp_key;
 	char buffor[BUFFOR_SIZE];
 	struct display_options *disp_opts;
@@ -270,16 +293,18 @@ void write_text(void *pdata){
 
 	while(1){
 		received_data = OSQPend(input_queue, 0, &pend_error);
-		//printf("%d", pend_error);
-		temp_key = *(INT16S*) received_data;
+		key = *received_data;
 		OSMemPut(input_memory, received_data);
-		key = (char)temp_key;
 
 		switch(key){
 			case 0x1B:
 				PC_DOSReturn();
 				break;
 			default:
+				if (char_counter < BUFFOR_SIZE - 1){
+          buffor[char_counter] = temp_key;
+          char_counter += 1;
+        }
 				break;
 		}
 
@@ -292,6 +317,4 @@ void write_text(void *pdata){
 		disp_opts -> bcolor = DISP_BGND_LIGHT_GRAY;
 		OSMboxPost(print_memory, disp_opts);
 	}
-
-
 }
