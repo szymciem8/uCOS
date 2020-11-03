@@ -39,6 +39,7 @@ W sumie 15 zdań
 typedef struct display_options{
   unsigned char line;		//linia wpisywania
   unsigned char offset;		//Przesuniecie
+  INT8S mode;
   char str[81]; 			//ciag znakow
   char size; 				//wielkość "Czyszczenia" konsolki
   INT8U bcolor; 			//kolor tla
@@ -152,9 +153,12 @@ void TaskStart(void *pdata){
     OS_CPU_SR  cpu_sr;
 #endif
 
-    unsigned char tasknrs[5];
+    unsigned char task_numbers[5];
+	display_options *disp_opts;
 
     pdata = pdata;                                         /* Prevent compiler warning                 */
+
+	disp_opts -> mode = 2;
 
     TaskStartDispInit();                                   /* Initialize the display                   */
 
@@ -169,13 +173,17 @@ void TaskStart(void *pdata){
 	OSTaskCreate(display, 		NULL, 	&TaskStk[1][TASK_STACK_SIZE - 1], 	DISPLAY_PRIO);
 	OSTaskCreate(edit_input, 	NULL, 	&TaskStk[2][TASK_STACK_SIZE - 1], 	EDIT_PRIO);
 
+	for(i=0; i<5; i++){
+		task_numbers[i] = i + 1;
+		PC_DispChar(76, i+7,	OSTaskCreate(mailbox_task, &task_numbers[i],		&TaskStk[i+5][TASK_STACK_SIZE - 1],	i+5)	+'0',	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+	}
+
 	for(;;){
 		TaskStartDisp();
 		OSCtxSwCtr = 0;
 		OSTimeDlyHMSM(0, 0, 1, 0);
 	}
 }
-
 static  void  TaskStartDispInit (void)
 {
     PC_DispStr( 0,  0, "                         uC/OS-II, The Real-Time Kernel                         ", DISP_FGND_WHITE + DISP_BGND_RED);
@@ -185,7 +193,7 @@ static  void  TaskStartDispInit (void)
     PC_DispStr( 0,  4, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_BLUE);
     PC_DispStr( 0,  5, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  6, "No. Load        Counter     Val         delta       dps                 State   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  7, "Q01 4294967296  4294967296  4294967296  4294967296                      done0   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  7, "Q01                                                                     done0   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  8, "Q02                                                                     busyX   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  9, "Q03                                                                     ERROR   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0, 10, "Q04                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -275,30 +283,48 @@ void read_key(void *pdata){
 void display(void *data){
 
   INT8U display_error, pend_error;
+  INT32U counter[15];
   struct display_options *disp_opts;
+  char load_to_print[11], counter_to_print[11];
   char clear[64] = "                                                               \0";
 
   data = data;
 
-  for(;;)
-  {
+  for(;;){
       disp_opts = OSMboxPend(main_mailbox, 0, &pend_error); //OSMBoxPend zwraca kody bledow - jesli wiadomosc dostarczona to OS_NO_ERROR
+		switch(disp_opts -> mode){
+		  case 1:
+			  if(pend_error == OS_NO_ERR) //OS_NO_ERROR
+			  {
+				clear[disp_opts->size]='\0'; //czyscimy linie
+				PC_DispStr(disp_opts->offset,	disp_opts->line,	clear,			DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				clear[disp_opts->size]= ' ';
+				PC_DispStr(disp_opts->offset,	disp_opts->line,	disp_opts->str,	DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			  }
+			  else{
+					   if (pend_error == OS_TIMEOUT) 			PC_DispStr(50, 5, "TIMEOUT ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else if (pend_error == OS_ERR_EVENT_TYPE)		PC_DispStr(50, 5, "EVENT TYPE ERRO", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else if (pend_error == OS_ERR_PEND_ISR)		PC_DispStr(50, 5, "ISR ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else if (pend_error == OS_ERR_PEVENT_NULL)	PC_DispStr(50, 5, "PEVENT ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else PC_DispStr(50, 5, "UNKNOWN ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			  }
+			  break;
+		  case 2:
+			  counter[disp_opts->task_number -1] = disp_opts->counter;
 
-      if(pend_error == OS_NO_ERR) //OS_NO_ERROR
-      {
-        clear[disp_opts->size]='\0'; //czyscimy linie
-        PC_DispStr(disp_opts->offset,	disp_opts->line,	clear,			DISP_FGND_YELLOW + DISP_BGND_BLUE);
-        clear[disp_opts->size]= ' ';
-        PC_DispStr(disp_opts->offset,	disp_opts->line,	disp_opts->str,	DISP_FGND_YELLOW + DISP_BGND_BLUE);
-      }
-	  else{
-			   if (pend_error == OS_TIMEOUT) 			PC_DispStr(50, 5, "TIMEOUT ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
-		  else if (pend_error == OS_ERR_EVENT_TYPE)		PC_DispStr(50, 5, "EVENT TYPE ERRO", DISP_FGND_YELLOW + DISP_BGND_BLUE);
-		  else if (pend_error == OS_ERR_PEND_ISR)		PC_DispStr(50, 5, "ISR ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
-		  else if (pend_error == OS_ERR_PEVENT_NULL)	PC_DispStr(50, 5, "PEVENT ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
-		  else PC_DispStr(50, 5, "UNKNOWN ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			  PC_DispStr(4, 6 + disp_opts->task_number,"         ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);	//load
+			  PC_DispStr(17, 6 + disp_opts->task_number,"         ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);	//counter
+
+			  sprintf(load_to_print, "%lu", disp_opts->load);
+			  sprintf(counter_to_print, "%lu", disp_opts->counter);
+
+			  PC_DispStr(4, 6 + disp_opts->task_number, load_to_print ,DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			  PC_DispStr(17, 6 + disp_opts->task_number, counter_to_print ,DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			  break;
+		  case 3:
+
+		  break;
 	  }
-
   }
 }
 /*
@@ -358,11 +384,11 @@ void edit_input(void *pdata){
 						if(memory_error != OS_NO_ERR){
 							if(memory_error == OS_MEM_NO_FREE_BLKS){
 								PC_DispStr(62,  6 + i + 1, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-								PC_DispStr(62,  6 + i + 1, "memory error1", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+								PC_DispStr(62,  6 + i + 1, "OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 							}
 							else if(memory_error == OS_MEM_INVALID_PMEM){
 								PC_DispStr(62,  6 + i + 1, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-								PC_DispStr(62,  6 + i + 1, "memory error2", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+								PC_DispStr(62,  6 + i + 1, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 							}
 						}
 					}
@@ -392,6 +418,7 @@ void edit_input(void *pdata){
 
 		disp_opts.line = 4;
 		disp_opts.offset = 0;
+		disp_opts.mode = 1;
 		strcpy(disp_opts.str, buffor);
 		disp_opts.size = BUFFOR_SIZE;
 		disp_opts.fcolor = DISP_FGND_BLACK;
@@ -429,6 +456,8 @@ void mailbox_task(void *data){
 		disp_opts.task_number = task_number;
 		disp_opts.load = load;
 		disp_opts.counter = counter;
+		disp_opts.mode = 2;
+		OSMboxPost(main_mailbox, &disp_opts);
 
 		for(load_iterator=0; load_iterator < load; load_iterator++);
 		counter++;
