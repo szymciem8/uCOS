@@ -107,10 +107,12 @@ void edit_input(void *data); 	//
 void display(void *data);     //obsluga ekranu
 void edit(void* data);
 
-
 void mailbox_task(void *data);
 void queue_task(void *data);
 void semaphore_task(void *data);
+
+void set_mailbox_load(void *data);
+void set_queue_load(void *data);
 
 //------------------------------------------------------------------------------
 //                                  MAIN
@@ -154,7 +156,7 @@ void TaskStart(void *pdata){
 
     pdata = pdata;                                         /* Prevent compiler warning                 */
 
-	disp_opts -> mode = 2;
+	disp_opts->mode = 3;
 
     TaskStartDispInit();                                   /* Initialize the display                   */
 
@@ -179,6 +181,7 @@ void TaskStart(void *pdata){
 	for(;;){
 		TaskStartDisp();
 		OSCtxSwCtr = 0;
+		OSMboxPost(main_mailbox, disp_opts);
 		OSTimeDlyHMSM(0, 0, 1, 0);
 	}
 }
@@ -280,10 +283,11 @@ void read_key(void *pdata){
 void display(void *data){
 
   INT8U display_error, pend_error;
-  INT32U counter[15];
+  INT32U counter[15], previous_counter[15];
   struct display_options *disp_opts;
-  char load_to_print[11], counter_to_print[11];
+  char load_to_print[11], counter_to_print[11], delta[11];
   char clear[64] = "                                                               \0";
+  int i;
 
   data = data;
 
@@ -319,6 +323,12 @@ void display(void *data){
 			  PC_DispStr(17, 6 + disp_opts->task_number, counter_to_print ,DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			  break;
 		  case 3:
+			for(i=0; i<15; i++){
+				sprintf(delta, "%lu", counter[i] - previous_counter[i]);
+				previous_counter[i] = counter[i];
+				PC_DispStr(40, 7 + i, "        ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(40, 7 + i, delta,     DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
 
 		  break;
 	  }
@@ -332,7 +342,7 @@ void edit_input(void *pdata){
 	INT32U *msg;
 	INT16S *received_data;
 	INT16S key;
-	char buffor[BUFFOR_SIZE];
+	char buffor[BUFFOR_SIZE] = "           ";
 	struct display_options disp_opts;
 
 	task_parameters *mailbox_params;
@@ -368,65 +378,17 @@ void edit_input(void *pdata){
 				break;
 			case 0x0D:				//Enter
 				value = strtoul(buffor, NULL, 10);
-				//MAILBOX
-				for(i=0; i<5; i++){
-					ptr_mailbox_params[i] = OSMemGet(mailbox_task_memory, &memory_error);
-					if(memory_error != OS_NO_ERR){
-						ptr_mailbox_params[i] = OSMemGet(mailbox_task_memory, &memory_error);
-						if(memory_error != OS_NO_ERR){
-							if(memory_error == OS_MEM_NO_FREE_BLKS){
-								PC_DispStr(62,  7 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-								PC_DispStr(62,  7 + i, "OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-							}
-							else if(memory_error == OS_MEM_INVALID_PMEM){
-								PC_DispStr(62,  7 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-								PC_DispStr(62,  7 + i, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-							}
-						}
-					}
-					ptr_mailbox_params[i] -> load = value;
-					mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params[i]);
-					if(mail_error == OS_MBOX_FULL){
-						PC_DispStr(62, 7 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-						PC_DispStr(62, 7 + i, "mbox full", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-						mailbox_params = OSMboxPend(mailbox[i], 0,&error);
-						OSMemPut(mailbox_task_memory, mailbox_params);
-						mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params[i]);
-					}
-				}
 
-				//QUEUE
-				for(i=0; i<5; i++){
-					ptr_queue_params[i] = OSMemGet(queue_task_memory, &memory_error);
-					if(memory_error != OS_NO_ERR){
-						ptr_queue_params[i] = OSMemGet(queue_task_memory, &memory_error);
-						if(memory_error != OS_NO_ERR){
-							if(memory_error == OS_MEM_NO_FREE_BLKS){
-								PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-								PC_DispStr(62, 12 + i, "OS_MEM_NO_FREE_BLKS", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-							}
-							else if (memory_error == OS_MEM_INVALID_PMEM){
-								PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-								PC_DispStr(62, 12 + i, "OS_MEM_INVALID_PMEM", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-							}
-						}
-					}
-					ptr_queue_params[i] -> load = value;
-					ptr_queue_params[i] -> task_number = i+6;
-					queue_error = OSQPost(queue, ptr_queue_params[i]);
-					if(queue_error == OS_Q_FULL){
-						PC_DispStr(67, 12 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-						PC_DispStr(67, 12 + i, "Queue full", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-						queue_params = OSQPend(queue, 0, &queue_error);
-						PC_DispStr(67, 12 + queue_params->task_number, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-						PC_DispStr(67, 12 + queue_params->task_number, "UTRACONE OBC", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-						OSMemPut(queue_task_memory, queue_params);
-						queue_error = OSQPost(queue, ptr_queue_params[i]);
-					}
+				set_mailbox_load(buffor);
 
-				}
+				set_queue_load(buffor);
 
 				OSSemPost(semaphore);
+
+				while(char_counter >0){
+					buffor[char_counter-1] = ' ';
+					char_counter -= 1;
+				}
 
 				break;
 			default:				//ladowanie danych do bufora
@@ -533,7 +495,6 @@ void queue_task(void *data){
 	}
 }
 
-
 void semaphore_task(void *data){
 	display_options disp_opts;
 	char task_number;
@@ -562,4 +523,83 @@ void semaphore_task(void *data){
 		OSTimeDly(1);
 	}
 
+}
+
+void set_mailbox_load(void *data){
+	int i;
+	INT8U memory_error, mail_error, error;		//ERRORS
+
+	task_parameters *mailbox_params;
+	task_parameters *ptr_mailbox_params[5];
+
+	value = strtoul(data, NULL, 10);
+
+	//MAILBOX
+	for(i=0; i<5; i++){
+		ptr_mailbox_params[i] = OSMemGet(mailbox_task_memory, &memory_error);
+		if(memory_error != OS_NO_ERR){
+			ptr_mailbox_params[i] = OSMemGet(mailbox_task_memory, &memory_error);
+			if(memory_error != OS_NO_ERR){
+				if(memory_error == OS_MEM_NO_FREE_BLKS){
+					PC_DispStr(62,  7 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+					PC_DispStr(62,  7 + i, "OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				}
+				else if(memory_error == OS_MEM_INVALID_PMEM){
+					PC_DispStr(62,  7 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+					PC_DispStr(62,  7 + i, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				}
+			}
+		}
+		ptr_mailbox_params[i] -> load = value;
+		mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params[i]);
+		if(mail_error == OS_MBOX_FULL){
+			PC_DispStr(62, 7 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(62, 7 + i, "mbox full", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			mailbox_params = OSMboxPend(mailbox[i], 0,&error);
+			OSMemPut(mailbox_task_memory, mailbox_params);
+			mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params[i]);
+		}
+	}
+
+}
+
+void set_queue_load(void *data){
+	int i;
+	INT8U memory_error, queue_error;		//ERRORS
+
+	task_parameters *queue_params;
+	task_parameters *ptr_queue_params[5];
+
+	value = strtoul(data, NULL, 10);
+
+	//QUEUE
+	for(i=0; i<5; i++){
+		ptr_queue_params[i] = OSMemGet(queue_task_memory, &memory_error);
+		if(memory_error != OS_NO_ERR){
+			ptr_queue_params[i] = OSMemGet(queue_task_memory, &memory_error);
+			if(memory_error != OS_NO_ERR){
+				if(memory_error == OS_MEM_NO_FREE_BLKS){
+					PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+					PC_DispStr(62, 12 + i, "OS_MEM_NO_FREE_BLKS", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				}
+				else if (memory_error == OS_MEM_INVALID_PMEM){
+					PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+					PC_DispStr(62, 12 + i, "OS_MEM_INVALID_PMEM", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				}
+			}
+		}
+		ptr_queue_params[i] -> load = value;
+		ptr_queue_params[i] -> task_number = i+6;
+		queue_error = OSQPost(queue, ptr_queue_params[i]);
+		if(queue_error == OS_Q_FULL){
+			PC_DispStr(67, 12 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 12 + i, "Queue full", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			queue_params = OSQPend(queue, 0, &queue_error);
+			PC_DispStr(67, 12 + queue_params->task_number, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 12 + queue_params->task_number, "UTRACONE OBC", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			OSMemPut(queue_task_memory, queue_params);
+			queue_error = OSQPost(queue, ptr_queue_params[i]);
+		}
+
+	}
 }
