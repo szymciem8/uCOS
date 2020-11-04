@@ -37,8 +37,8 @@ W sumie 15 zdań
 
 //Struktura pozwalajaca skrocic funkcje display string
 typedef struct display_options{
-  unsigned char line;		//linia wpisywania
-  unsigned char offset;		//Przesuniecie
+  unsigned char x;		//linia wpisywania
+  unsigned char y;		//Przesuniecie
   INT8S mode;
   char str[81]; 			//ciag znakow
   char size; 				//wielkość "Czyszczenia" konsolki
@@ -77,6 +77,7 @@ OS_EVENT *input_queue;
 void *input_queue_tab[32];
 
 OS_EVENT *main_mailbox;
+OS_EVENT *value_mailbox;
 
 //MAILBOX TASKS
 OS_EVENT *mailbox[5];
@@ -91,8 +92,6 @@ OS_MEM *queue_task_memory;
 
 //SEMAPHORE TASKS
 OS_EVENT *semaphore;
-INT32U value;
-
 
 //------------------------------------------------------------------------------
 //                          PROTOTYPES OF FUNCTIONS
@@ -102,10 +101,9 @@ void TaskStart(void *pdata);
 static  void  TaskStartDispInit(void);
 static  void  TaskStartDisp(void);
 
-void read_key(void *data);    //obsluga klawiatury
-void edit_input(void *data); 	//
-void display(void *data);     //obsluga ekranu
-void edit(void* data);
+void read_key(void *data);		//obsluga klawiatury
+void edit_input(void *data); 	//obsuluga wpisywanych danych
+void display(void *data);		//obsluga ekranu
 
 void mailbox_task(void *data);
 void queue_task(void *data);
@@ -126,19 +124,21 @@ void main(void){
   PC_VectSet(uCOS, OSCtxSw);
 
   input_queue = OSQCreate(input_queue_tab, 32);		//Przechowuje w kolejce dane wejściowe
-  main_mailbox = OSMboxCreate(NULL);
+  main_mailbox = OSMboxCreate(NULL);				//mailbox sluzacy do przesylania danych miedzy read_key(), a edit_input()
 
+  //Inicjalizacja obkietow potrzebnych do zadan obciazajacych
   for(i=0; i<5; i++){
-	mailbox[i] = OSMboxCreate(NULL);
+	mailbox[i] = OSMboxCreate(NULL);	//skrzynki
   }
-  queue = OSQCreate(queue_array, 15);
-  semaphore = OSSemCreate(0);
-  value = 100;
+  queue = OSQCreate(queue_array, 15);	//kolejka
+  semaphore = OSSemCreate(0);			//semafor
 
+  value_mailbox = OSMboxCreate(NULL);
+
+  //Tworzymy miejsce w pamieci na odpowiednie zadania
   mailbox_task_memory = OSMemCreate(mailbox_memory_block, 15, sizeof(task_parameters), &memory_error);
   queue_task_memory = OSMemCreate(queue_memory_block, 15, sizeof(task_parameters), &memory_error);
 
-  display_memory = OSMemCreate(display_memory_block, 32, sizeof(display_options), &memory_error);
   input_memory = OSMemCreate(input_memory_block, 32, 4, &memory_error);
 
   OSTaskCreate(TaskStart, (void*)0, &TaskStartStk[TASK_STACK_SIZE - 1], 0);
@@ -298,9 +298,9 @@ void display(void *data){
 			  if(pend_error == OS_NO_ERR) //OS_NO_ERROR
 			  {
 				clear[disp_opts->size]='\0'; //czyscimy linie
-				PC_DispStr(disp_opts->offset,	disp_opts->line,	clear,			DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				PC_DispStr(disp_opts->y,	disp_opts->x,	clear,			DISP_FGND_YELLOW + DISP_BGND_BLUE);
 				clear[disp_opts->size]= ' ';
-				PC_DispStr(disp_opts->offset,	disp_opts->line,	disp_opts->str,	DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				PC_DispStr(disp_opts->y,	disp_opts->x,	disp_opts->str,	DISP_FGND_YELLOW + DISP_BGND_BLUE);
 			  }
 			  else{
 					   if (pend_error == OS_TIMEOUT) 			PC_DispStr(50, 5, "TIMEOUT ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
@@ -377,11 +377,12 @@ void edit_input(void *pdata){
 				}
 				break;
 			case 0x0D:				//Enter
-				value = strtoul(buffor, NULL, 10);
 
 				set_mailbox_load(buffor);
 
 				set_queue_load(buffor);
+
+				OSMboxPost(value_mailbox, buffor);
 
 				OSSemPost(semaphore);
 
@@ -392,7 +393,6 @@ void edit_input(void *pdata){
 
 				break;
 			default:				//ladowanie danych do bufora
-			//PC_DispStr(0, 1, " "+char_counter, DISP_FGND_YELLOW + DISP_BGND_BLUE);
 				if (char_counter < BUFFOR_SIZE-1){
 					buffor[char_counter] = key;
 					char_counter += 1;
@@ -400,18 +400,16 @@ void edit_input(void *pdata){
 				break;
 		}
 
-		//disp_opts = OSMemGet(display_memory, &memory_error);
-
-		disp_opts.line = 4;
-		disp_opts.offset = 0;
+		disp_opts.x = 4;
+		disp_opts.y = 0;
 		disp_opts.mode = 1;
 		strcpy(disp_opts.str, buffor);
 		disp_opts.size = BUFFOR_SIZE;
 		disp_opts.fcolor = DISP_FGND_BLACK;
 		disp_opts.bcolor = DISP_BGND_LIGHT_GRAY;
+
 		post_error = OSMboxPost(main_mailbox, &disp_opts);
 
-		//printf("%p %p", &disp_opts, main_mailbox);
 		if (post_error == OS_MBOX_FULL) PC_DispStr(50, 5, "OS_MBOX_FULL", DISP_FGND_YELLOW + DISP_BGND_BLUE);
 		else if (post_error == OS_ERR_EVENT_TYPE) 		PC_DispStr(0, 1, "OS_ERR_EVENT_TYPE", DISP_FGND_YELLOW + DISP_BGND_BLUE);
 		else if (post_error == OS_ERR_PEVENT_NULL) 		PC_DispStr(0, 1, "OS_ERR_PEVENT_NULL", DISP_FGND_YELLOW + DISP_BGND_BLUE);
@@ -433,6 +431,7 @@ void mailbox_task(void *data){
 	task_number = *(INT8U*)data;
 
 	while(1){
+		//Pobieramy parametry danej skrzynki
 		mailbox_task_params = OSMboxAccept(mailbox[task_number - 1]);
 		if(mailbox_task_params != NULL){
 			load = mailbox_task_params->load;
@@ -498,22 +497,30 @@ void queue_task(void *data){
 void semaphore_task(void *data){
 	display_options disp_opts;
 	char task_number;
-	INT8U memory_error;
+	INT8U memory_error, mail_error;
 	int i;
 	INT32U load=100, load_iterator;
 	INT32U counter=0;
+	INT32U value=100;
+	void *msg;
 
 	task_number = *(INT8U *)data + 10;
 
 	while(1){
-		if(OSSemAccept(semaphore)){
-			if(load != value) load=value;
-			OSSemPost(semaphore);
+		//Tutaj trzeba prawdopodobnie stworzyć miejsce w pamieci, żeby działało
+		msg = OSMboxAccept(value_mailbox);					//Jesli jest to odbieramy msg, czyli buffor z edit
+
+		if (msg != (void *)0)load = strtoul(msg, NULL, 10);	//W momencie pojawienia sie wiadomosci aktualizujemy load
+
+		if(OSSemAccept(semaphore)){	//Oczekujemy na semafor
+			OSSemPost(semaphore);	//Wysylamy semafor
 		}
 
+		//Petla obciazajaca
 		for(load_iterator=0; load_iterator<load; load_iterator++);
 		counter++;
 
+		//Opcje wyswietlania
 		disp_opts.task_number = task_number;
 		disp_opts.load = load;
 		disp_opts.counter = counter;
@@ -525,9 +532,11 @@ void semaphore_task(void *data){
 
 }
 
+//Funkcja ustawiajaca load dla mailboxa
 void set_mailbox_load(void *data){
 	int i;
 	INT8U memory_error, mail_error, error;		//ERRORS
+	INT32U value;
 
 	task_parameters *mailbox_params;
 	task_parameters *ptr_mailbox_params[5];
@@ -563,9 +572,11 @@ void set_mailbox_load(void *data){
 
 }
 
+//Funkcja ustawiajaca load dla kolejki
 void set_queue_load(void *data){
 	int i;
 	INT8U memory_error, queue_error;		//ERRORS
+	INT32U value;
 
 	task_parameters *queue_params;
 	task_parameters *ptr_queue_params[5];
