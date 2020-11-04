@@ -103,16 +103,16 @@ static  void  TaskStartDispInit(void);
 static  void  TaskStartDisp(void);
 
 void read_key(void *data);		//obsluga klawiatury
-void edit_input(void *data); 	//obsuluga wpisywanych danych
+void edit_input(void *data); 	//obsluga wpisywanych danych
 void display(void *data);		//obsluga ekranu
 
 void mailbox_task(void *data);
 void queue_task(void *data);
 void semaphore_task(void *data);
 
-void set_mailbox_load(void *data);
-void set_queue_load(void *data);
-void handle_semaphore(void *data);
+void set_mailbox_load(void *data);		//ustawianie obciazenia dla mboxów
+void set_queue_load(void *data);		//ustawianie obciazenia dla kolejek
+void handle_semaphore(void *data);		//ustawianie obciazenia dla semaforów
 
 //------------------------------------------------------------------------------
 //                                  MAIN
@@ -128,7 +128,7 @@ void main(void){
   input_queue = OSQCreate(input_queue_tab, 32);		//Przechowuje w kolejce dane wejściowe
   main_mailbox = OSMboxCreate(NULL);				//mailbox sluzacy do przesylania danych miedzy read_key(), a edit_input()
 
-  //Inicjalizacja obkietow potrzebnych do zadan obciazajacych
+  //Inicjalizacja obiektow potrzebnych do zadan obciazajacych
   for(i=0; i<5; i++){
 	mailbox[i] = OSMboxCreate(NULL);	//skrzynki
   }
