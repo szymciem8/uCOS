@@ -91,6 +91,9 @@ OS_MEM *queue_task_memory;
 //SEMAPHORE TASKS
 OS_EVENT *semaphore;
 
+//Obciazenie semafora, niestety zmienna globalna
+INT32U semaphore_load = 255;
+
 //------------------------------------------------------------------------------
 //                          PROTOTYPES OF FUNCTIONS
 //------------------------------------------------------------------------------
@@ -109,6 +112,7 @@ void semaphore_task(void *data);
 
 void set_mailbox_load(void *data);
 void set_queue_load(void *data);
+void handle_semaphore(void *data);
 
 //------------------------------------------------------------------------------
 //                                  MAIN
@@ -129,7 +133,7 @@ void main(void){
 	mailbox[i] = OSMboxCreate(NULL);	//skrzynki
   }
   queue = OSQCreate(queue_array, 15);	//kolejka
-  semaphore = OSSemCreate(0);			//semafor
+  semaphore = OSSemCreate(1);			//semafor
 
   value_mailbox = OSMboxCreate(NULL);
 
@@ -283,6 +287,10 @@ void read_key(void *pdata){
   }
 }
 
+//------------------------------------------------------------------------------
+//                                     DISPLAY
+//------------------------------------------------------------------------------
+
 void display(void *data){
 
   INT8U display_error, pend_error;							//errors
@@ -341,6 +349,10 @@ void display(void *data){
   }
 }
 
+//------------------------------------------------------------------------------
+//                                EDIT INPUT
+//------------------------------------------------------------------------------
+
 void edit_input(void *pdata){
 	int i;
 	INT8U post_error, pend_error, memory_error, mail_error, queue_error, error;		//ERRORS
@@ -385,9 +397,7 @@ void edit_input(void *pdata){
 				//ustawiamy load dla każdego zadania
 				set_mailbox_load(buffor);
 				set_queue_load(buffor);
-				OSMboxPost(value_mailbox, buffor);
-
-				OSSemPost(semaphore);
+				handle_semaphore(buffor);
 
 				//Po zakończeniu usuwamy całą linię danych
 				while(char_counter >0){
@@ -421,6 +431,10 @@ void edit_input(void *pdata){
 		else if (post_error == OS_ERR_POST_NULL_PTR) 	PC_DispStr(0, 1, "OS_ERR_POST_NULL_PTR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
 	}
 }
+
+//------------------------------------------------------------------------------
+//                               LOADED TASKS
+//------------------------------------------------------------------------------
 
 void mailbox_task(void *data){
 	display_options disp_opts;
@@ -548,24 +562,17 @@ void queue_task(void *data){
 void semaphore_task(void *data){
 	display_options disp_opts;
 	char task_number;
-	INT8U memory_error, mail_error;
-	int i;
+	INT8U semaphore_error;
 	INT32U load=255, load_iterator;
 	INT32U counter=0;
-	INT32U value=255;
-	void *msg;
 
 	task_number = *(INT8U *)data + 10;
 
 	while(1){
-		//Tutaj trzeba prawdopodobnie stworzyć miejsce w pamieci, żeby działało
-		msg = OSMboxAccept(value_mailbox);					//Jesli jest to odbieramy msg, czyli buffor z edit
 
-		if (msg != (void *)0)load = strtoul(msg, NULL, 10);	//W momencie pojawienia sie wiadomosci aktualizujemy load
-
-		if(OSSemAccept(semaphore)){	//Oczekujemy na semafor
-			OSSemPost(semaphore);	//Wysylamy semafor
-		}
+		OSSemPend(semaphore, 0, &semaphore_error);
+		if(load != semaphore_load) load = semaphore_load;
+		OSSemPost(semaphore);
 
 		//Petla obciazajaca
 		for(load_iterator=0; load_iterator<load; load_iterator++);
@@ -580,8 +587,11 @@ void semaphore_task(void *data){
 
 		OSTimeDly(1);
 	}
-
 }
+
+//------------------------------------------------------------------------------
+//                            LOADERS AND HANDLER
+//------------------------------------------------------------------------------
 
 //Funkcja ustawiajaca load dla mailboxa
 void set_mailbox_load(void *data){
@@ -658,5 +668,52 @@ void set_queue_load(void *data){
 			queue_error = OSQPost(queue, ptr_queue_params[i]);
 		}
 
+	}
+}
+
+void handle_semaphore(void *data){
+	INT8U semaphore_error;
+
+	semaphore_load = strtoul(data, NULL, 10);
+
+	OSSemPend(semaphore, 0, &semaphore_error);
+
+	if(semaphore_error != OS_NO_ERR){
+		if(semaphore_error == OS_TIMEOUT){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_TIMEOUT", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_EVENT_TYPE){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_EVENT_TYPE", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_PEND_ISR){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_PEND_ISR", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_PEVENT_NULL){
+			PC_DispStr(67, 22, "                   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_PEVENT_NULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+	}
+
+	semaphore_error = OSSemPost(semaphore);
+
+	if(semaphore_error != OS_NO_ERR){
+		if(semaphore_error == OS_TIMEOUT){
+
+		}
+		else if(semaphore_error == OS_SEM_OVF){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_SEM_OVF", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_EVENT_TYPE){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_EVENT_TYPE", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_PEVENT_NULL){
+			PC_DispStr(67, 22, "                   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_PEVENT_NULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
 	}
 }
