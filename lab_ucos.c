@@ -11,6 +11,12 @@ OPIS
 5 zadań -> kolejaka
 5 zadań -> semafor
 W sumie 15 zdań
+
+Problemy:
+Popatrzeć na inicjalizację zmiennych wskaźników.
+Z kolejki brać tylko te najnowsze dane
+
+
 */
 
 //LIBRARIES
@@ -29,6 +35,10 @@ W sumie 15 zdań
 #define KEYBOARD_PRIO 1
 #define DISPLAY_PRIO 2
 #define EDIT_PRIO 3
+
+#define EDIT_BAR 	0
+#define TASK_INFO 	1
+#define DELTA_VALUE 2
 
 //------------------------------------------------------------------------------
 //                                  STRUCTURES
@@ -63,32 +73,32 @@ typedef struct task_parameters{
 OS_STK TaskStk[NUMBER_OF_TASKS][TASK_STACK_SIZE];
 OS_STK TaskStartStk[TASK_STACK_SIZE];
 
-OS_MEM *input_memory;		//Wskaznik danego bloku pamieci
+OS_MEM *input_memory = 0;		//Wskaznik danego bloku pamieci
 INT32U input_memory_block[32][4];
 
-OS_MEM *display_memory;
-INT32U *display_memory_block;
+OS_MEM *display_memory = 0;
+INT32U *display_memory_block = 0;
 
-OS_EVENT *input_queue;
+OS_EVENT *input_queue = 0;
 void *input_queue_tab[32];
 
-OS_EVENT *main_queue;
+OS_EVENT *main_queue = 0;
 
 //MAILBOX TASKS
 OS_EVENT *mailbox[5];
 task_parameters mailbox_memory_block[15];
 
-OS_MEM *mailbox_task_memory;
+OS_MEM *mailbox_task_memory = 0;
 void *main_queue_array[32];
 
 //QUEUE TASKS
-OS_EVENT *queue;
+OS_EVENT *queue = 0;
 void *queue_array[15];
 task_parameters queue_memory_block[15];
-OS_MEM *queue_task_memory;
+OS_MEM *queue_task_memory = 0;
 
 //SEMAPHORE TASKS
-OS_EVENT *semaphore;
+OS_EVENT *semaphore = 0;
 
 //Obciazenie semafora, niestety zmienna globalna
 INT32U semaphore_load = 255;
@@ -158,7 +168,7 @@ void TaskStart(void *pdata){
 
     pdata = pdata;                                         /* Prevent compiler warning                 */
 
-	disp_opts->mode = 3;
+	disp_opts->mode = DELTA_VALUE;
 
     TaskStartDispInit();                                   /* Initialize the display                   */
 
@@ -202,7 +212,7 @@ static  void  TaskStartDispInit (void)
     PC_DispStr( 0,  3, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  4, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_BLUE);
     PC_DispStr( 0,  5, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  6, "No.     Load           Counter              delta                      Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  6, "No.           Load         Counter              delta                  Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  7, "M01                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  8, "M02                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  9, "M03                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -297,9 +307,9 @@ void read_key(void *pdata){
 void display(void *data){
 
   INT8U display_error, pend_error;							//errors
-  INT32U counter[15], previous_counter[15];					//liczniki
+  INT32U counter[15] = {0}, previous_counter[15] = {0};					//liczniki
   struct display_options *disp_opts;						//opcje wyswietlania
-  char load_to_print[11], counter_to_print[11], delta[11];	//zmienne sluzace do zapisania sformatowanych danych
+  char load_to_print[20], counter_to_print[20], delta[20];	//zmienne sluzace do zapisania sformatowanych danych
   char clear[64] = "                                                               \0";
   int i;
 
@@ -309,7 +319,7 @@ void display(void *data){
       disp_opts = OSQPend(main_queue, 0, &pend_error);
 		switch(disp_opts -> mode){
 		//Wyswietlanie linii z danymi do wpisania
-		  case 1:
+		  case EDIT_BAR:
 			  if(pend_error == OS_NO_ERR) //OS_NO_ERROR
 			  {
 				clear[disp_opts->size]='\0'; //czyscimy linie
@@ -326,23 +336,23 @@ void display(void *data){
 			  }
 			  break;
 		  //Wyswietlamy wartości load i counter dla każdego zadania
-		  case 2:
+		  case TASK_INFO:
 			  counter[disp_opts->task_number -1] = disp_opts->counter;
 
 			  PC_DispStr(4, 6 + disp_opts->task_number,"         ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);	//load
 			  PC_DispStr(17, 6 + disp_opts->task_number,"         ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);	//counter
 
 			  //Korzystając z funkcji sprintf, formatujemy odpowiednio zapis load i counter
-			  sprintf(load_to_print, "%lu", disp_opts->load);
-			  sprintf(counter_to_print, "%lu", disp_opts->counter);
+			  sprintf(load_to_print, "%10lu", disp_opts->load);
+			  sprintf(counter_to_print, "%10lu", disp_opts->counter);
 
 			  PC_DispStr(8, 6 + disp_opts->task_number, load_to_print ,DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			  PC_DispStr(25, 6 + disp_opts->task_number, counter_to_print ,DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			  break;
-		  case 3:
+		  case DELTA_VALUE:
 		  //Dla każdego zadania wyświetlamy wartość delty, czyli zmiany countera w jednostce czasu
 			for(i=0; i<15; i++){
-				sprintf(delta, "%lu", counter[i] - previous_counter[i]);
+				sprintf(delta, "%10lu", counter[i] - previous_counter[i]);
 				previous_counter[i] = counter[i];
 				PC_DispStr(45, 7 + i, "                ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 				PC_DispStr(45, 7 + i, delta,             DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -368,6 +378,11 @@ void edit_input(void *pdata){
 	pdata = pdata;
 
 	buffor[BUFFOR_SIZE - 1] = '\0';	//Koniec buffer jest pusty
+
+	//Opcje do wyświetlenia wpisywanych danych
+	disp_opts.x = 4;
+	disp_opts.y = 0;
+	disp_opts.mode = EDIT_BAR;
 
 	while(1){
 		received_data = OSQPend(input_queue, 0, &pend_error);	 //Pobieramy received_data z kolejki, czyli wskaznik
@@ -399,6 +414,7 @@ void edit_input(void *pdata){
 
 				//ustawiamy load dla każdego zadania
 				set_mailbox_load(buffor);
+				OSQFlush(queue);
 				set_queue_load(buffor);
 				handle_semaphore(buffor);
 
@@ -418,9 +434,6 @@ void edit_input(void *pdata){
 		}
 
 		//Opcje do wyświetlenia wpisywanych danych
-		disp_opts.x = 4;
-		disp_opts.y = 0;
-		disp_opts.mode = 1;
 		strcpy(disp_opts.str, buffor);
 		disp_opts.size = BUFFOR_SIZE;
 
@@ -439,9 +452,12 @@ void edit_input(void *pdata){
 //                               LOADED TASKS
 //------------------------------------------------------------------------------
 
+//Problem z wypełnianiem się mailboxów
+//Wypełniają się w różnej kolejności
+
 void mailbox_task(void *data){
 	display_options disp_opts;
-	task_parameters *mailbox_task_params;
+	task_parameters *mailbox_task_params = 0;
 
 	char task_number;
 	INT8U memory_error;
@@ -449,8 +465,15 @@ void mailbox_task(void *data){
 	INT32U load=255;
 	INT32U load_iterator;
 	INT32U counter=0;
+	INT32U k=0;
+
+	//Problem
 
 	task_number = *(INT8U*)data;
+
+	//Opcje do wyświetlenia
+	disp_opts.task_number = task_number;
+	disp_opts.mode = TASK_INFO;
 
 	while(1){
 		//Pobieramy parametry danej skrzynki
@@ -464,14 +487,14 @@ void mailbox_task(void *data){
 		}
 
 		//Opcje do wyświetlenia
-		disp_opts.task_number = task_number;
 		disp_opts.load = load;
 		disp_opts.counter = counter;
-		disp_opts.mode = 2;
 		OSQPost(main_queue, &disp_opts);
 
 		//Pętla obciążająca
-		for(load_iterator=0; load_iterator < load; load_iterator++);
+		for(load_iterator=0; load_iterator < load; load_iterator++){
+			k++;
+		}
 		counter++;
 		OSTimeDly(1);
 	}
@@ -487,14 +510,18 @@ void queue_task(void *data){
 	//OSEventTbl[OS_EVENT_TBL_SIZE] -> lista oczekujacych wiadomosci
 
 	display_options disp_opts;
-	task_parameters *queue_task_params;
+	task_parameters *queue_task_params = 0;
 	char task_number;
 	INT8U memory_error;
 	INT32U i;
 	INT32U load=255, load_iterator;
-	INT32U counter=0;
+	INT32U k=0, counter=0;
 
 	task_number = *(INT8U*) data + 5;
+
+	//Aktualizujemy dane do wyświetlenia
+	disp_opts.task_number = task_number;
+	disp_opts.mode = TASK_INFO;
 
 	while(1){
 		//Pobieramy informacje o kolejce
@@ -509,7 +536,7 @@ void queue_task(void *data){
 			//pobieramy dane do tasku
 			if (queue_task_params != NULL){
 				//Operacja dla pierwszej wiadomosci dla danego zadania kolejki
-				if(i == 0 && queue_task_params->task_number == task_number){
+				if(queue_task_params->task_number == task_number){
 					//Pobieramy load z pobranych parametrow
 					load = queue_task_params->load;
 					memory_error = OSMemPut(queue_task_memory, queue_task_params);
@@ -523,25 +550,28 @@ void queue_task(void *data){
 							PC_DispStr(62, 6 + task_number, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 						}
 					}
+					break;
 				}
 				//W przeciwnym wypadku
-				else OSQPost(queue, queue_task_params);
+				else {
+					OSQPost(queue, queue_task_params);
+				}
 			}
 		}
-		counter++;
-
-		//Pętla obciążająca
-		for(load_iterator=0; load_iterator<load; load_iterator++);
 
 		//Aktualizujemy dane do wyświetlenia
-		disp_opts.task_number = task_number;
 		disp_opts.load = load;
 		disp_opts.counter = counter;
-		disp_opts.mode = 2;
 
 		//Przesyłamy opcje do wyświetlenia
 		OSQPost(main_queue, &disp_opts);
 
+		//Pętla obciążająca
+		for(load_iterator=0; load_iterator<load; load_iterator++){
+			k++;
+		}
+
+		counter++;
 		OSTimeDly(1);
 	}
 }
@@ -551,27 +581,29 @@ void semaphore_task(void *data){
 	char task_number;
 	INT8U semaphore_error;
 	INT32U load=255, load_iterator;
-	INT32U counter=0;
+	INT32U k=0, counter=0;
 
 	task_number = *(INT8U *)data + 10;
+
+	disp_opts.mode = TASK_INFO;
+	disp_opts.task_number = task_number;
 
 	while(1){
 
 		OSSemPend(semaphore, 0, &semaphore_error);
-		if(load != semaphore_load) load = semaphore_load;
+		load = semaphore_load;
 		OSSemPost(semaphore);
 
-		//Petla obciazajaca
-		for(load_iterator=0; load_iterator<load; load_iterator++);
-		counter++;
-
 		//Opcje wyswietlania
-		disp_opts.task_number = task_number;
 		disp_opts.load = load;
 		disp_opts.counter = counter;
-		disp_opts.mode = 2;
 		OSQPost(main_queue, &disp_opts);
 
+		//Petla obciazajaca
+		for(load_iterator=0; load_iterator<load; load_iterator++){
+			k++;
+		}
+		counter++;
 		OSTimeDly(1);
 	}
 }
@@ -587,13 +619,13 @@ void set_mailbox_load(void *data){
 	INT32U value;
 
 	task_parameters *mailbox_params;
-	task_parameters *ptr_mailbox_params[5];
+	task_parameters *ptr_mailbox_params;
 
 	value = strtoul(data, NULL, 10);
 
 	//MAILBOX
 	for(i=0; i<5; i++){
-		ptr_mailbox_params[i] = OSMemGet(mailbox_task_memory, &memory_error);
+		ptr_mailbox_params = OSMemGet(mailbox_task_memory, &memory_error);
 		if(memory_error != OS_NO_ERR){
 			if(memory_error == OS_MEM_NO_FREE_BLKS){
 				PC_DispStr(62,  7 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -604,14 +636,18 @@ void set_mailbox_load(void *data){
 				PC_DispStr(62,  7 + i, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			}
 		}
-		ptr_mailbox_params[i] -> load = value;
-		mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params[i]);
+		ptr_mailbox_params -> load = value;
+		mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params);
 		if(mail_error == OS_MBOX_FULL){
-			PC_DispStr(62, 7 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-			PC_DispStr(62, 7 + i, "MBOX_FULL", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-			mailbox_params = OSMboxPend(mailbox[i], 0,&error);
+			PC_DispStr(69, 7 + i, "           ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(69, 7 + i, " MBOX_FULL ", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			mailbox_params = OSMboxPend(mailbox[i], 0, &error);
 			OSMemPut(mailbox_task_memory, mailbox_params);
-			mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params[i]);
+			mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params);
+			if(mail_error == OS_NO_ERR){
+				PC_DispStr(69, 7 + i, "           ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(69, 7 + i, " STATUS OK ", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
 		}
 	}
 
@@ -624,13 +660,12 @@ void set_queue_load(void *data){
 	INT32U value;
 
 	task_parameters *queue_params;
-	task_parameters *ptr_queue_params[5];
 
 	value = strtoul(data, NULL, 10);
 
 	//QUEUE
 	for(i=0; i<5; i++){
-		ptr_queue_params[i] = OSMemGet(queue_task_memory, &memory_error);
+		queue_params = OSMemGet(queue_task_memory, &memory_error);
 		if(memory_error != OS_NO_ERR){
 			if(memory_error == OS_MEM_NO_FREE_BLKS){
 				PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -640,17 +675,17 @@ void set_queue_load(void *data){
 				PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 				PC_DispStr(62, 12 + i, "OS_MEM_INVALID_PMEM", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			}
-			}
+		}
 		//Aktulizacja load i task_number
-		ptr_queue_params[i] -> load = value;
-		ptr_queue_params[i] -> task_number = i+6;
-		queue_error = OSQPost(queue, ptr_queue_params[i]);
+		queue_params -> load = value;
+		queue_params -> task_number = i+6;
+		queue_error = OSQPost(queue, queue_params);
 		if(queue_error == OS_Q_FULL){
 			PC_DispStr(67, 12 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			PC_DispStr(67, 12 + i, "Q_FULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			queue_params = OSQPend(queue, 0, &queue_error);
 			OSMemPut(queue_task_memory, queue_params);
-			queue_error = OSQPost(queue, ptr_queue_params[i]);
+			queue_error = OSQPost(queue, queue_params);
 		}
 
 	}
