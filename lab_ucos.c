@@ -74,27 +74,27 @@ OS_STK TaskStk[NUMBER_OF_TASKS][TASK_STACK_SIZE];
 OS_STK TaskStartStk[TASK_STACK_SIZE];
 
 OS_MEM *input_memory = 0;		//Wskaznik danego bloku pamieci
-INT32U input_memory_block[32][4];
+INT32U input_memory_block[64][4];
 
 OS_MEM *display_memory = 0;
 INT32U *display_memory_block = 0;
 
 OS_EVENT *input_queue = 0;
-void *input_queue_tab[32];
+void *input_queue_tab[64];
 
 OS_EVENT *main_queue = 0;
 
 //MAILBOX TASKS
 OS_EVENT *mailbox[5];
-task_parameters mailbox_memory_block[15];
+task_parameters mailbox_memory_block[64];
 
 OS_MEM *mailbox_task_memory = 0;
 void *main_queue_array[32];
 
 //QUEUE TASKS
 OS_EVENT *queue = 0;
-void *queue_array[15];
-task_parameters queue_memory_block[15];
+void *queue_array[64] = {0};
+task_parameters queue_memory_block[128] = {0};
 OS_MEM *queue_task_memory = 0;
 
 //SEMAPHORE TASKS
@@ -148,7 +148,7 @@ void main(void){
   //Tworzymy miejsce w pamieci na odpowiednie zadania, czyli partycje
   //Adres pierwszego bloku, ilosc blokow, wielkosc blokow, blad
   mailbox_task_memory = OSMemCreate(mailbox_memory_block, 15, sizeof(task_parameters), &memory_error);
-  queue_task_memory = OSMemCreate(queue_memory_block, 15, sizeof(task_parameters), &memory_error);
+  queue_task_memory = OSMemCreate(queue_memory_block, 128, sizeof(task_parameters), &memory_error);
 
   //Tworzymy 32 bloki o wielkości 4 bity, nie działa sizeof(INT16S) ani sizeof(char)
   input_memory = OSMemCreate(input_memory_block, 32, 4, &memory_error);
@@ -212,7 +212,7 @@ static  void  TaskStartDispInit (void)
     PC_DispStr( 0,  3, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  4, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_BLUE);
     PC_DispStr( 0,  5, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  6, "No.           Load         Counter              delta                  Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  6, "No.         Load            Counter                delta               Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  7, "M01                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  8, "M02                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  9, "M03                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -289,7 +289,7 @@ void read_key(void *pdata){
 		}else{
 			//Obsługa błędów
 			if(memory_error == OS_MEM_NO_FREE_BLKS){
-				PC_DispStr(60, 4, "OS_MEM_NO_FREE_BLKS", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				PC_DispStr(60, 4, "1OS_MEM_NO_FREE_BLKS", DISP_FGND_YELLOW + DISP_BGND_BLUE);
 			}
 			if(memory_error == OS_MEM_INVALID_PMEM){
 				PC_DispStr(60, 5, "MEM_INVALID_PMEM", DISP_FGND_YELLOW + DISP_BGND_BLUE);
@@ -542,12 +542,12 @@ void queue_task(void *data){
 					memory_error = OSMemPut(queue_task_memory, queue_task_params);
 					if(memory_error != OS_NO_ERR){
 						if(memory_error == OS_MEM_NO_FREE_BLKS){
-							PC_DispStr(62, 6 + task_number, "                   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-							PC_DispStr(62, 6 + task_number, "OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+							PC_DispStr(61, 6 + task_number, "                    ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+							PC_DispStr(61, 6 + task_number, "2OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 						}
 						else if(memory_error == OS_MEM_INVALID_PMEM){
-							PC_DispStr(62, 6 + task_number, "                   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-							PC_DispStr(62, 6 + task_number, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+							PC_DispStr(61, 6 + task_number, "                    ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+							PC_DispStr(61, 6 + task_number, "1OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 						}
 					}
 					break;
@@ -628,12 +628,12 @@ void set_mailbox_load(void *data){
 		ptr_mailbox_params = OSMemGet(mailbox_task_memory, &memory_error);
 		if(memory_error != OS_NO_ERR){
 			if(memory_error == OS_MEM_NO_FREE_BLKS){
-				PC_DispStr(62,  7 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-				PC_DispStr(62,  7 + i, "OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(61,  7 + i, "                     ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(61,  7 + i, "3OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			}
 			else if(memory_error == OS_MEM_INVALID_PMEM){
-				PC_DispStr(62,  7 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-				PC_DispStr(62,  7 + i, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(61,  7 + i, "                     ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(61,  7 + i, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			}
 		}
 		ptr_mailbox_params -> load = value;
@@ -650,7 +650,6 @@ void set_mailbox_load(void *data){
 			}
 		}
 	}
-
 }
 
 //Funkcja ustawiajaca load dla kolejki
@@ -668,8 +667,8 @@ void set_queue_load(void *data){
 		queue_params = OSMemGet(queue_task_memory, &memory_error);
 		if(memory_error != OS_NO_ERR){
 			if(memory_error == OS_MEM_NO_FREE_BLKS){
-				PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-				PC_DispStr(62, 12 + i, "OS_MEM_NO_FREE_BLKS", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(60, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(60, 12 + i, "4OS_MEM_NO_FREE_BLKS", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			}
 			else if (memory_error == OS_MEM_INVALID_PMEM){
 				PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
