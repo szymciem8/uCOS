@@ -15,8 +15,6 @@ W sumie 15 zdań
 Problemy:
 Popatrzeć na inicjalizację zmiennych wskaźników.
 Z kolejki brać tylko te najnowsze dane
-
-
 */
 
 //LIBRARIES
@@ -30,15 +28,21 @@ Z kolejki brać tylko te najnowsze dane
 #define NUMBER_OF_TASKS 21
 #define BUFFOR_SIZE 11
 
-#define DONE 0
-
+//Definicje priorytetów
 #define KEYBOARD_PRIO 1
 #define DISPLAY_PRIO 2
 #define EDIT_PRIO 3
 
+//Definicje mode'ów do wyświetlania
 #define EDIT_BAR 	0
 #define TASK_INFO 	1
 #define DELTA_VALUE 2
+
+//Definicja przycisków
+#define ESCAPE 		0x1B
+#define BACKSPACE 	0x08
+#define DELETE 		0x2E
+#define ENTER 		0x0D
 
 //------------------------------------------------------------------------------
 //                                  STRUCTURES
@@ -111,14 +115,17 @@ void TaskStart(void *pdata);
 static  void  TaskStartDispInit(void);
 static  void  TaskStartDisp(void);
 
+//Interface
 void read_key(void *data);		//obsluga klawiatury
 void edit_input(void *data); 	//obsuluga wpisywanych danych
 void display(void *data);		//obsluga ekranu
 
+//Tasks
 void mailbox_task(void *data);
 void queue_task(void *data);
 void semaphore_task(void *data);
 
+//Loaders
 void set_mailbox_load(void *data);
 void set_queue_load(void *data);
 void handle_semaphore(void *data);
@@ -212,7 +219,7 @@ static  void  TaskStartDispInit (void)
     PC_DispStr( 0,  3, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  4, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_BLUE);
     PC_DispStr( 0,  5, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  6, "No.         Load            Counter                delta               Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  6, "No.          Load           Counter                delta               Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  7, "M01                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  8, "M02                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  9, "M03                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -393,25 +400,24 @@ void edit_input(void *pdata){
 
 		//Na podstawie key wykonujemy odpowiednie funkcje
 		switch(key){
-			case 0x1B:				//Escape
+			case ESCAPE:				//Escape
 				PC_DOSReturn();
 				break;
-			case 0x08:				//Backaspace
+			case BACKSPACE:				//Backaspace
 				//Jeżeli istnieją jakieś znaki to można je usunąć
 				if (char_counter > 0){
 					buffor[char_counter-1] = ' ';
 					char_counter -= 1;
 				}
 				break;
-			case 0x2E:				//Delete
+			case DELETE:				//Delete
 				//Usuwamy wszystkie znaki
 				while(char_counter >0){
 					buffor[char_counter-1] = ' ';
 					char_counter -= 1;
 				}
 				break;
-			case 0x0D:				//Enter
-
+			case ENTER:				//Enter
 				//ustawiamy load dla każdego zadania
 				set_mailbox_load(buffor);
 				OSQFlush(queue);
@@ -423,7 +429,6 @@ void edit_input(void *pdata){
 					buffor[char_counter-1] = ' ';
 					char_counter -= 1;
 				}
-
 				break;
 			default:				//ladowanie danych do bufora
 				if (char_counter < BUFFOR_SIZE-1){
@@ -686,7 +691,6 @@ void set_queue_load(void *data){
 			OSMemPut(queue_task_memory, queue_params);
 			queue_error = OSQPost(queue, queue_params);
 		}
-
 	}
 }
 
@@ -720,7 +724,8 @@ void handle_semaphore(void *data){
 
 	if(semaphore_error != OS_NO_ERR){
 		if(semaphore_error == OS_TIMEOUT){
-
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_TIMEOUT", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 		}
 		else if(semaphore_error == OS_SEM_OVF){
 			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
