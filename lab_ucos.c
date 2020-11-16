@@ -53,8 +53,8 @@ typedef struct display_options{
   unsigned char x;		//linia wpisywania
   unsigned char y;		//Przesuniecie
   INT8S mode;
-  char str[81]; 			//ciag znakow
-  char size; 				//wielkość "Czyszczenia" konsolki
+  char str[81]; 		//ciag znakow
+  char size; 			//wielkość "Czyszczenia" konsolki
 
   int task_number;
   INT32U load;
@@ -68,6 +68,8 @@ typedef struct task_parameters{
   INT32U counter;
   INT32U error;
 }task_parameters;
+
+typedef enum {false, true} boolean;
 
 //------------------------------------------------------------------------------
 //                              GLOBAL VARIABLES
@@ -420,7 +422,7 @@ void edit_input(void *pdata){
 			case ENTER:				//Enter
 				//ustawiamy load dla każdego zadania
 				set_mailbox_load(buffor);
-				OSQFlush(queue);
+				//OSQFlush(queue);
 				set_queue_load(buffor);
 				handle_semaphore(buffor);
 
@@ -521,6 +523,8 @@ void queue_task(void *data){
 	INT32U i;
 	INT32U load=255, load_iterator;
 	INT32U k=0, counter=0;
+	INT32U temp=0;
+	boolean w_msg = true;
 
 	task_number = *(INT8U*) data + 5;
 
@@ -532,6 +536,8 @@ void queue_task(void *data){
 		//Pobieramy informacje o kolejce
 		OSQQuery(queue, &queue_data);
 
+		w_msg = true;
+
 		//Iterujemy przez kolejne wiadomosci
 		for(i=0; i<queue_data.OSNMsgs; i++){
 			//Jezeli mamy dostepna wiadomosc w kolejce pobieramy dane
@@ -541,8 +547,8 @@ void queue_task(void *data){
 			//pobieramy dane do tasku
 			if (queue_task_params != NULL){
 				//Operacja dla pierwszej wiadomosci dla danego zadania kolejki
-				if(queue_task_params->task_number == task_number){
-					//Pobieramy load z pobranych parametrow
+				if(queue_task_params->task_number == task_number && w_msg == true){
+					w_msg = false;
 					load = queue_task_params->load;
 					memory_error = OSMemPut(queue_task_memory, queue_task_params);
 					if(memory_error != OS_NO_ERR){
@@ -555,7 +561,7 @@ void queue_task(void *data){
 							PC_DispStr(61, 6 + task_number, "1OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 						}
 					}
-					break;
+					//break; -> nie działa
 				}
 				//W przeciwnym wypadku
 				else {
@@ -690,6 +696,10 @@ void set_queue_load(void *data){
 			queue_params = OSQPend(queue, 0, &queue_error);
 			OSMemPut(queue_task_memory, queue_params);
 			queue_error = OSQPost(queue, queue_params);
+			if (queue_error == OS_NO_ERR){
+				PC_DispStr(67, 12 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(67, 12 + i, "STATUS OK", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
 		}
 	}
 }
