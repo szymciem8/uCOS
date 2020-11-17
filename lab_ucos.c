@@ -86,16 +86,16 @@ OS_MEM *display_memory = 0;
 INT32U *display_memory_block = 0;
 
 OS_EVENT *input_queue = 0;
-void *input_queue_tab[64];
+void *input_queue_tab[64] = {0};
 
 OS_EVENT *main_queue = 0;
 
 //MAILBOX TASKS
-OS_EVENT *mailbox[5];
-task_parameters mailbox_memory_block[64];
+OS_EVENT *mailbox[5] = {0};
+task_parameters mailbox_memory_block[64] = {0};
 
 OS_MEM *mailbox_task_memory = 0;
-void *main_queue_array[32];
+void *main_queue_array[32] = {0};
 
 //QUEUE TASKS
 OS_EVENT *queue = 0;
@@ -221,7 +221,7 @@ static  void  TaskStartDispInit (void)
     PC_DispStr( 0,  3, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  4, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_BLUE);
     PC_DispStr( 0,  5, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  6, "No.          Load           Counter                delta               Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  6, "No.           Load          Counter                delta               Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  7, "M01                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  8, "M02                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  9, "M03                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
@@ -523,7 +523,6 @@ void queue_task(void *data){
 	INT32U i;
 	INT32U load=255, load_iterator;
 	INT32U k=0, counter=0;
-	INT32U temp=0;
 	boolean w_msg = true;
 
 	task_number = *(INT8U*) data + 5;
@@ -649,17 +648,20 @@ void set_mailbox_load(void *data){
 		}
 		ptr_mailbox_params -> load = value;
 		mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params);
-		if(mail_error == OS_MBOX_FULL){
+
+		if(mail_error == OS_MBOX_FULL){ //W przypadku zapełnionej skrzynki
 			PC_DispStr(69, 7 + i, "           ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			PC_DispStr(69, 7 + i, " MBOX_FULL ", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-			mailbox_params = OSMboxPend(mailbox[i], 0, &error);
+			/*
+			mailbox_params = OSMboxPend(mailbox[i], 0, &error); //opróżniamy każdą ze skrzynek
 			OSMemPut(mailbox_task_memory, mailbox_params);
-			mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params);
-			if(mail_error == OS_NO_ERR){
-				PC_DispStr(69, 7 + i, "           ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-				PC_DispStr(69, 7 + i, " STATUS OK ", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-			}
+			mail_error = OSMboxPost(mailbox[i], ptr_mailbox_params);//ładujemy aktualne dane
+			*/
 		}
+		if(mail_error == OS_NO_ERR){
+				PC_DispStr(69, 7 + i, "           ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(69, 7 + i, " STATUS_OK ", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
 	}
 }
 
@@ -690,15 +692,15 @@ void set_queue_load(void *data){
 		queue_params -> load = value;
 		queue_params -> task_number = i+6;
 		queue_error = OSQPost(queue, queue_params);
-		if(queue_error == OS_Q_FULL){
-			PC_DispStr(67, 12 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-			PC_DispStr(67, 12 + i, "Q_FULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-			queue_params = OSQPend(queue, 0, &queue_error);
+		if(queue_error == OS_Q_FULL){	//W przypadku pełnej kolejki
+			PC_DispStr(70, 12 + i, "       ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(70, 12 + i, "Q_FULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			queue_params = OSQPend(queue, 0, &queue_error);//Opróżnaimy kolejkę
 			OSMemPut(queue_task_memory, queue_params);
-			queue_error = OSQPost(queue, queue_params);
+			queue_error = OSQPost(queue, queue_params);//ładujemy aktualne dane
 			if (queue_error == OS_NO_ERR){
-				PC_DispStr(67, 12 + i, "             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-				PC_DispStr(67, 12 + i, "STATUS OK", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(70, 12 + i, "         ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(70, 12 + i, "STATUS_OK", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 			}
 		}
 	}
