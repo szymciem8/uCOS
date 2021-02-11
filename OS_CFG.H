@@ -94,21 +94,21 @@
 #define OS_TASK_CREATE_EN         1    /*     Include code for OSTaskCreate()                          */
 #define OS_TASK_CREATE_EXT_EN     0    /*     Include code for OSTaskCreateExt()                       */
 #define OS_TASK_DEL_EN            1    /*     Include code for OSTaskDel()                             */
-#define OS_TASK_SUSPEND_EN        1    /*     Include code for OSTaskSuspend() and OSTaskResume()      */
-#define OS_TASK_QUERY_EN          0    /*     Include code for OSTaskQuery()                           */
+#define OS_TASK_SUSPEND_EN        0    /*     Include code for OSTaskSuspend() and OSTaskResume()      */
+#define OS_TASK_QUERY_EN          1    /*     Include code for OSTaskQuery()                           */
 
 
                                        /* --------------------- TIME MANAGEMENT ---------------------- */
 #define OS_TIME_DLY_HMSM_EN       1    /*     Include code for OSTimeDlyHMSM()                         */
-#define OS_TIME_DLY_RESUME_EN     0    /*     Include code for OSTimeDlyResume()                       */
-#define OS_TIME_GET_SET_EN        1    /*     Include code for OSTimeGet() and OSTimeSet()             */
+#define OS_TIME_DLY_RESUME_EN     1    /*     Include code for OSTimeDlyResume()                       */
+#define OS_TIME_GET_SET_EN        0    /*     Include code for OSTimeGet() and OSTimeSet()             */
 
 
                                        /* ---------------------- MISCELLANEOUS ----------------------- */
 #define OS_SCHED_LOCK_EN          1    /*     Include code for OSSchedLock() and OSSchedUnlock()       */
 
 
-#define OS_TICKS_PER_SEC        200    /* Set the number of ticks in one second                        */
+#define OS_TICKS_PER_SEC        460    /* Set the number of ticks in one second                        */
 
 
 typedef INT16U             OS_FLAGS;   /* Date type for event flag bits (8, 16 or 32 bits)             */

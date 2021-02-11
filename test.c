@@ -1,109 +1,171 @@
 /*
-*********************************************************************************************************
-*                                                uC/OS-II
-*                                          The Real-Time Kernel
-*
-*                           (c) Copyright 1992-2002, Jean J. Labrosse, Weston, FL
-*                                           All Rights Reserved
-*
-*                                               EXAMPLE #1
-*********************************************************************************************************
+------------------------------SYSTEMY OPERACYJNE--------------------------------
+Program polegający, który ma za zadnie obciążać wieloma procesami (task)
+system operacyjny czasu rzeczywistego.
+Politechnika Śląska
+Wydział Automatyki, Elektroniki i Informatyki
+Laboratorium RTOS 2,3
+Autorzy: Szymon Ciemała, Jakub Kaniowski
 */
 
+//LIBRARIES
 #include "includes.h"
-/*
-*********************************************************************************************************
-*                                               CONSTANTS
-*********************************************************************************************************
-*/
 
-#define  TASK_STK_SIZE                 512       /* Size of each task's stacks (# of WORDs)            */
-#define  N_TASKS                        10       /* Number of identical tasks                          */
+//------------------------------------------------------------------------------
+//                                  CONSTANTS
+//------------------------------------------------------------------------------
 
-//Priorytety zadań
-#define TASK_READ_PRIO 1
-#define TASK_BUFF_PRIO 2
-#define TASK_DISPLAY_PRIO 3
+#define TASK_STACK_SIZE 512
+#define NUMBER_OF_TASKS 21
+#define BUFFOR_SIZE 11
 
-#define MSG_QUEUE_SIZE 20
-#define lineSize 40			//Maksymalna ilość znaków w linii
+//Definicje priorytetów
+#define KEYBOARD_PRIO 1
+#define DISPLAY_PRIO 2
+#define EDIT_PRIO 3
 
-/*
-*********************************************************************************************************
-*                                               VARIABLES
-*********************************************************************************************************
-*/
+//Definicje mode'ów do wyświetlania
+#define EDIT_BAR 	0
+#define TASK_INFO 	1
+#define DELTA_VALUE 2
 
-OS_STK        TaskStk[N_TASKS][TASK_STK_SIZE];        /* Tasks stacks                                  */
-OS_STK        TaskStartStk[TASK_STK_SIZE];
+//Definicja przycisków
+#define ESCAPE 		0x1B
+#define BACKSPACE 	0x08
+#define DELETE 		0x2E
+#define ENTER 		0x0D
 
-//Dodatkowe stosy dla Read, Buff oraz DisplayStk
-OS_STK        TaskReadStk[TASK_STK_SIZE];
-OS_STK        TaskBuffStk[TASK_STK_SIZE];
-OS_STK        TaskDisplayStk[TASK_STK_SIZE];
+//------------------------------------------------------------------------------
+//                                  STRUCTURES
+//------------------------------------------------------------------------------
 
-char          TaskData[N_TASKS];                      /* Parameters to pass to each task               */
-OS_EVENT      *RandomSem;
+//Struktura pozwalajaca skrocic funkcje display string
+typedef struct display_options{
+  unsigned char x;		//linia wpisywania
+  unsigned char y;		//Przesuniecie
+  INT8S mode;
+  char str[81]; 		//ciag znakow
+  char size; 			//wielkość "Czyszczenia" konsolki
 
-OS_EVENT      *Mbox;
-OS_EVENT      *MsgQueue;
-void          *MsgQueueTb1[MSG_QUEUE_SIZE];
+  int task_number;
+  INT32U load;
+  INT32U counter;
+}display_options;
 
-/*
-*********************************************************************************************************
-*                                           FUNCTION PROTOTYPES
-*********************************************************************************************************
-*/
+//TASK PARAMETERS
+typedef struct task_parameters{
+  INT8S task_number;
+  INT32U load;
+  INT32U counter;
+  INT32U error;
+}task_parameters;
 
-        void  Task(void *data);                       /* Function prototypes of tasks                  */
-        void  TaskStart(void *data);                  /* Function prototypes of Startup task           */
-static  void  TaskStartCreateTasks(void);
+typedef enum {false, true} boolean;
+
+//------------------------------------------------------------------------------
+//                              GLOBAL VARIABLES
+//------------------------------------------------------------------------------
+
+//STACKS
+OS_STK TaskStk[NUMBER_OF_TASKS][TASK_STACK_SIZE];
+OS_STK TaskStartStk[TASK_STACK_SIZE];
+
+OS_MEM *input_memory = 0;		//Wskaznik danego bloku pamieci
+INT32U input_memory_block[64][4];
+
+OS_EVENT *input_queue = 0;
+void *input_queue_tab[64] = {0};
+
+OS_EVENT *main_queue = 0;
+
+//MAILBOX TASKS
+OS_EVENT *mailbox[5] = {0};
+task_parameters mailbox_memory_block[64] = {0};
+
+OS_MEM *mailbox_task_memory = 0;
+void *main_queue_array[32] = {0};
+
+//QUEUE TASKS
+OS_EVENT *queue = 0;
+void *queue_array[64] = {0};
+task_parameters queue_memory_block[128] = {0};
+OS_MEM *queue_task_memory = 0;
+
+//SEMAPHORE TASKS
+OS_EVENT *semaphore = 0;
+
+//Obciazenie semafora, niestety zmienna globalna
+INT32U semaphore_load = 255;
+
+//------------------------------------------------------------------------------
+//                          PROTOTYPES OF FUNCTIONS
+//------------------------------------------------------------------------------
+void TaskStart(void *pdata);
+
 static  void  TaskStartDispInit(void);
 static  void  TaskStartDisp(void);
 
-//Nowe funkcje
-void read(void *data);
-void display(void *data);
-void buff(void *data);
+//Interface
+void read_key(void *data);		//obsluga klawiatury
+void edit_input(void *data); 	//obsuluga wpisywanych danych
+void display(void *data);		//obsluga ekranu
 
-/*$PAGE*/
-/*
-*********************************************************************************************************
-*                                                MAIN
-*********************************************************************************************************
-*/
+//Tasks
+void mailbox_task(void *data);
+void queue_task(void *data);
+void semaphore_task(void *data);
 
-void  main (void)
-{
-    PC_DispClrScr(DISP_FGND_WHITE + DISP_BGND_BLACK);      /* Clear the screen                         */
+//Loaders
+void set_mailbox_load(void *data);
+void set_queue_load(void *data);
+void handle_semaphore(void *data);
 
-    OSInit();                                              /* Initialize uC/OS-II                      */
+//------------------------------------------------------------------------------
+//                                  MAIN
+//------------------------------------------------------------------------------
+void main(void){
+  int i;
+  INT8U memory_error;
+  PC_DispClrScr(DISP_FGND_WHITE + DISP_BGND_BLACK);      /* Clear the screen                         */
+  OSInit();                                              /* Initialize uC/OS-II                      */
+  PC_DOSSaveReturn();                                    /* Save environment to return to DOS        */
+  PC_VectSet(uCOS, OSCtxSw);
 
-    PC_DOSSaveReturn();                                    /* Save environment to return to DOS        */
-    PC_VectSet(uCOS, OSCtxSw);                             /* Install uC/OS-II's context switch vector */
+  input_queue = OSQCreate(input_queue_tab, 32);		//przesylanie danych miedzy input_key(), a edit_input()
+  main_queue = OSQCreate(main_queue_array, 10);		//przesylanie danych miedzy display(), zadaniami
 
-    RandomSem   = OSSemCreate(1);                          /* Random number semaphore                  */
+  //Inicjalizacja obkietow potrzebnych do zadan obciazajacych
+  for(i=0; i<5; i++){
+	mailbox[i] = OSMboxCreate(NULL);	//skrzynki
+  }
+  queue = OSQCreate(queue_array, 15);	//kolejka
+  semaphore = OSSemCreate(1);			//semafor, funkcja przujmuje za argument dowolną liczbą od 0 do 65,535
+  //0 oznacza, ze semafor jest zajety
 
-    OSTaskCreate(TaskStart, (void *)0, &TaskStartStk[TASK_STK_SIZE - 1], 0);
-    OSStart();                                             /* Start multitasking                       */
+  //Tworzymy miejsce w pamieci na odpowiednie zadania, czyli partycje
+  //Adres pierwszego bloku, ilosc blokow, wielkosc blokow, blad
+  mailbox_task_memory = OSMemCreate(mailbox_memory_block, 15, sizeof(task_parameters), &memory_error);
+  queue_task_memory = OSMemCreate(queue_memory_block, 128, sizeof(task_parameters), &memory_error);
+
+  //Tworzymy 32 bloki o wielkości 4 bity, nie działa sizeof(INT16S) ani sizeof(char)
+  input_memory = OSMemCreate(input_memory_block, 32, 4, &memory_error);
+
+  OSTaskCreate(TaskStart, (void*)0, &TaskStartStk[TASK_STACK_SIZE - 1], 0);
+  OSStart();
 }
 
-
-/*
-*********************************************************************************************************
-*                                              STARTUP TASK
-*********************************************************************************************************
-*/
-void  TaskStart (void *pdata)
-{
+void TaskStart(void *pdata){
+  int i;
 #if OS_CRITICAL_METHOD == 3                                /* Allocate storage for CPU status register */
     OS_CPU_SR  cpu_sr;
 #endif
-    char       s[100];
-    INT16S     key;
 
+    unsigned char task_numbers[5];
+	display_options *disp_opts;
 
     pdata = pdata;                                         /* Prevent compiler warning                 */
+
+	disp_opts->mode = DELTA_VALUE;
 
     TaskStartDispInit();                                   /* Initialize the display                   */
 
@@ -112,73 +174,65 @@ void  TaskStart (void *pdata)
     PC_SetTickRate(OS_TICKS_PER_SEC);                      /* Reprogram tick rate                      */
     OS_EXIT_CRITICAL();
 
-    OSStatInit();                                          /* Initialize uC/OS-II's statistics         */
+    OSStatInit();
 
-//NOWE
-    Mbox = OSMboxCreate((void *)0);                        /*Tworzmy skrzynkę                           */
-    MsgQueue = OSQCreate(&MsgQueueTb1[0], MSG_QUEUE_SIZE);   /*Oraz kolejkę                               */
+	//Taski związane z wczytywaniem danych od uzytkownika
+	OSTaskCreate(read_key, 		NULL, 	&TaskStk[1][TASK_STACK_SIZE - 1], 	KEYBOARD_PRIO);
+	OSTaskCreate(display, 		NULL, 	&TaskStk[2][TASK_STACK_SIZE - 1], 	DISPLAY_PRIO);
+	OSTaskCreate(edit_input, 	NULL, 	&TaskStk[3][TASK_STACK_SIZE - 1], 	EDIT_PRIO);
 
-    TaskStartCreateTasks();                                /* Create all the application tasks         */
+	//Taski glowne - mailbox, queue, semaphore
+	for(i=0; i<5; i++){
+		task_numbers[i] = i + 1;
 
-    for (;;) {
-        TaskStartDisp();                                  /* Update the display                       */
+		PC_DispStr(70, i+7,  "STATUS_OK",	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		PC_DispStr(70, i+12, "STATUS_OK",	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		PC_DispStr(70, i+17, "STATUS_OK",	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
 
-        OSCtxSwCtr = 0;                                    /* Clear context switch counter             */
-        OSTimeDlyHMSM(0, 0, 1, 0);                         /* Wait one second                          */
-    }
+		OSTaskCreate(mailbox_task,   &task_numbers[i],	&TaskStk[i+4][TASK_STACK_SIZE - 1],		i+4);
+		OSTaskCreate(queue_task,     &task_numbers[i], 	&TaskStk[i+9][TASK_STACK_SIZE - 1], 	i+9);
+		OSTaskCreate(semaphore_task, &task_numbers[i], 	&TaskStk[i+14][TASK_STACK_SIZE - 1], 	i+14);
+	}
+
+	for(;;){
+		TaskStartDisp();
+		OSCtxSwCtr = 0;
+		OSQPost(main_queue, disp_opts); //wysylamy za pomoca mailbox'a dane do wyswietlenia delty
+		OSTimeDlyHMSM(0, 0, 1, 0);
+	}
 }
-
-/*$PAGE*/
-/*
-*********************************************************************************************************
-*                                        INITIALIZE THE DISPLAY
-*********************************************************************************************************
-*/
-
 static  void  TaskStartDispInit (void)
 {
-/*                                1111111111222222222233333333334444444444555555555566666666667777777777 */
-/*                      01234567890123456789012345678901234567890123456789012345678901234567890123456789 */
-    PC_DispStr( 0,  0, "                                                                                ", DISP_FGND_WHITE + DISP_BGND_RED + DISP_BLINK);
+    PC_DispStr( 0,  0, "                         uC/OS-II, The Real-Time Kernel                         ", DISP_FGND_WHITE + DISP_BGND_RED);
     PC_DispStr( 0,  1, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  2, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
     PC_DispStr( 0,  3, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  4, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  4, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_BLUE);
     PC_DispStr( 0,  5, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  6, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  7, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  8, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0,  9, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 10, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 11, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 12, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 13, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 14, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 15, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 16, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 17, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 18, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 19, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 20, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 21, "                                                                                ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 22, "#Tasks          :        CPU Usage:     %                                       ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 23, "#Task switch/sec:                                                               ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-    PC_DispStr( 0, 24, "                            <-PRESS 'ESC' TO QUIT->                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY + DISP_BLINK);
-/*                                1111111111222222222233333333334444444444555555555566666666667777777777 */
-/*                      01234567890123456789012345678901234567890123456789012345678901234567890123456789 */
+    PC_DispStr( 0,  6, "No.           Load          Counter                delta               Status   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  7, "M01                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  8, "M02                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0,  9, "M03                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 10, "M04                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 11, "M05                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 12, "Q06                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 13, "Q07                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 14, "Q08                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 15, "Q09                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 16, "Q10                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 17, "S11                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 18, "S12                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 19, "S13                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 20, "S14                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 21, "S15                                                                             ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+    PC_DispStr( 0, 22, "#Tasks          :        CPU Usage:     %                                       ", DISP_FGND_WHITE + DISP_BGND_BLUE);
+    PC_DispStr( 0, 23, "#Task switch/sec:                                                               ", DISP_FGND_WHITE + DISP_BGND_BLUE);
+    PC_DispStr( 0, 24, "                            <-PRESS 'ESC' TO QUIT->                             ", DISP_FGND_WHITE + DISP_BGND_RED);
 }
-
-/*$PAGE*/
-/*
-*********************************************************************************************************
-*                                           UPDATE THE DISPLAY
-*********************************************************************************************************
-*/
 
 static  void  TaskStartDisp (void)
 {
     char   s[80];
-
 
     sprintf(s, "%5d", OSTaskCtr);                                  /* Display #tasks running               */
     PC_DispStr(18, 22, s, DISP_FGND_YELLOW + DISP_BGND_BLUE);
@@ -188,11 +242,11 @@ static  void  TaskStartDisp (void)
     PC_DispStr(36, 22, s, DISP_FGND_YELLOW + DISP_BGND_BLUE);
 #endif
 
-    sprintf(s, "%5d", OSCtxSwCtr);                                 /* Display #context switches per second */
+    sprintf(s, "%5u", OSCtxSwCtr);                                 /* Display #context switches per second */
     PC_DispStr(18, 23, s, DISP_FGND_YELLOW + DISP_BGND_BLUE);
 
     sprintf(s, "V%1d.%02d", OSVersion() / 100, OSVersion() % 100); /* Display uC/OS-II's version number    */
-    PC_DispStr(75, 24, s, DISP_FGND_YELLOW + DISP_BGND_BLUE);
+    PC_DispStr(75, 24, s, DISP_FGND_YELLOW + DISP_BGND_RED);
 
     switch (_8087) {                                               /* Display whether FPU present          */
         case 0:
@@ -213,159 +267,475 @@ static  void  TaskStartDisp (void)
     }
 }
 
-/*$PAGE*/
-/*
-*********************************************************************************************************
-*                                             CREATE TASKS
-*********************************************************************************************************
-*/
+//------------------------------------------------------------------------------
+//                                  READ_KEY
+//------------------------------------------------------------------------------
+void read_key(void *pdata){
+  INT16S key;			//przycisk
+  INT8U memory_error;	//blad pamieci
+  INT16S *msg;			//wiadomosc
 
-static  void  TaskStartCreateTasks (void)
-{
-    INT8U  i;
+  pdata = pdata;        //Dbamy o to, zeby nie wystapil blad kompilatora, nie można inicjować zmiennych
 
-    //Tworzmy nowe zadania. Każde z nich ma określonyh priorytet, swój stak ("stos")
-    //Task READ
-    OSTaskCreate(read, (void *)0, &TaskReadStk[TASK_STK_SIZE - 1], TASK_READ_PRIO);
-
-    //Task DISPLAY
-    OSTaskCreate(display, (void *)0, &TaskDisplayStk[TASK_STK_SIZE - 1], TASK_DISPLAY_PRIO);
-
-    //Task BUFF
-    OSTaskCreate(buffers, (void *)0, &TaskBuffStk[TASK_STK_SIZE -1], TASK_BUFF_PRIO);
-
-
-    for (i = 0; i < N_TASKS; i++) {                        /* Create N_TASKS identical tasks           */
-        TaskData[i] = '0' + i;                             /* Each task will display its own letter    */
-        OSTaskCreate(Task, (void *)&TaskData[i], &TaskStk[i][TASK_STK_SIZE - 1], i + 1);
+  while(1){
+    if(PC_GetKey(&key) == TRUE){						//Pobieramy przycisk
+		msg = OSMemGet(input_memory, &memory_error);	//Funkcja pobiera adres pustej komórki pamięci
+		if(memory_error == OS_NO_ERR){					//W wypadku kiedy nie ma żadnego błędu możemy kontynuować
+			*msg = key;									//W wybranym miejscu w pamięci zapisujemy key
+			OSQPost(input_queue, (void*)msg);			//Przesylamy wskaznik do kolejki
+		}else{
+			//Obsługa błędów
+			if(memory_error == OS_MEM_NO_FREE_BLKS){
+				PC_DispStr(60, 4, "1OS_MEM_NO_FREE_BLKS", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			}
+			if(memory_error == OS_MEM_INVALID_PMEM){
+				PC_DispStr(60, 5, "MEM_INVALID_PMEM", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			}
+		}
     }
-}
-
-/*
-*********************************************************************************************************
-*                                                  TASKS
-*********************************************************************************************************
-*/
-
-void  Task (void *pdata)
-{
-    INT8U  x;
-    INT8U  y;
-    INT8U  err;
-
-    for (;;) {
-        OSSemPend(RandomSem, 0, &err);           /* Acquire semaphore to perform random numbers        */
-        x = random(80);                          /* Find X position where task number will appear      */
-        y = random(16);                          /* Find Y position where task number will appear      */
-        OSSemPost(RandomSem);                    /* Release semaphore                                  */
-                                                 /* Display the task number on the screen              */
-        PC_DispChar(x, y + 5, *(char *)pdata, DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-        OSTimeDly(1);                            /* Delay 1 clock tick                                 */
-    }
-}
-
-//Funkcja wczytująca kliknięcia przycisku
-void read (void *data){
-  char key;   //przycisku
-  char *ptr;  //wzkźnik
-  INT8U ctr;  //counter 'ctr' -> ilość znaków w linii
-
-  data = data; //Zapobiegamy ostrzeżeniom kompilatora
-  ptr = &key;  //Zapisujemy wskaźnika przycisku
-  ctr = 0;     //Zerujemy counter 'ctr'
-
-  for (;;){ //Pętla nieskończona
-    if(PC_GetKey((void *)ptr)){  //Wywołujemy funkcję PC_GetKey przekazując jej wskaźnik nieokreślonego typu
-      if(key == 13 && ctr!=0){ //Enter
-        OSQPost(MsgQueue, (void *)&key); //Dokładamy znak do kolejki
-        ctr = 0; //Restartujemy ctr
-      }else{
-        OSQPost(MsgQueue, (void *) &key); //Dodajemy każdy inny znak
-        ctr++; //Zwiększamy
-      }
-    }
-    OSTimeDly(1); //Opóźnienie 1clk
+    OSTimeDly(14);   //Oczekujemy 14 cykli zegarowych -> 30 ms
   }
 }
 
-//Pobiera i przesyła dane
-void buffer (void *data){
-  INT8U err;
-  char *msg;
+//------------------------------------------------------------------------------
+//                                     DISPLAY
+//------------------------------------------------------------------------------
+
+void display(void *data){
+
+  INT8U display_error, pend_error;							            //errors
+  INT32U counter[15] = {0}, previous_counter[15] = {0};			//liczniki
+  struct display_options *disp_opts;						            //opcje wyswietlania
+  char load_to_print[20], counter_to_print[20], delta[20];	//zmienne sluzace do zapisania sformatowanych danych
+  char clear[64] = "                                                               \0";
+  int i;
 
   data = data;
 
   for(;;){
-    msg = (char *)OSQPend(MsgQueue, 0, &err); //Odbieramy wiadomości z kolejki
-    OSMboxPost(Mbox, (char *) &msg[0]);       //Adres pierwszej komórki msg
-    OSTimeDly(1);                             //Tick
+      disp_opts = OSQPend(main_queue, 0, &pend_error);
+		switch(disp_opts -> mode){
+		//Wyswietlanie linii z danymi do wpisania
+		  case EDIT_BAR:
+			  if(pend_error == OS_NO_ERR) //OS_NO_ERROR
+			  {
+				clear[disp_opts->size]='\0'; //czyscimy linie
+				PC_DispStr(disp_opts->y,	disp_opts->x,	clear,			DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				clear[disp_opts->size]= ' ';
+				PC_DispStr(disp_opts->y,	disp_opts->x,	disp_opts->str,	DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			  }
+			  else{
+					   if (pend_error == OS_TIMEOUT) 			PC_DispStr(50, 5, "TIMEOUT ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else if (pend_error == OS_ERR_EVENT_TYPE)		PC_DispStr(50, 5, "EVENT TYPE ERRO", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else if (pend_error == OS_ERR_PEND_ISR)		PC_DispStr(50, 5, "ISR ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else if (pend_error == OS_ERR_PEVENT_NULL)	PC_DispStr(50, 5, "PEVENT ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+				  else PC_DispStr(50, 5, "UNKNOWN ERROR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+			  }
+			  break;
+		  //Wyswietlamy wartości load i counter dla każdego zadania
+		  case TASK_INFO:
+			  counter[disp_opts->task_number -1] = disp_opts->counter;
+
+			  PC_DispStr(4, 6 + disp_opts->task_number,"         ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);	//load
+			  PC_DispStr(17, 6 + disp_opts->task_number,"         ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);	//counter
+
+			  //Korzystając z funkcji sprintf, formatujemy odpowiednio zapis load i counter
+			  sprintf(load_to_print, "%10lu", disp_opts->load);
+			  sprintf(counter_to_print, "%10lu", disp_opts->counter);
+
+			  PC_DispStr(8, 6 + disp_opts->task_number, load_to_print ,DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			  PC_DispStr(25, 6 + disp_opts->task_number, counter_to_print ,DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			  break;
+		  case DELTA_VALUE:
+		  //Dla każdego zadania wyświetlamy wartość delty, czyli zmiany countera w jednostce czasu
+			for(i=0; i<15; i++){
+				sprintf(delta, "%10lu", counter[i] - previous_counter[i]);
+				previous_counter[i] = counter[i];
+				PC_DispStr(45, 7 + i, "                ",DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(45, 7 + i, delta,             DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
+		  break;
+	  }
   }
 }
 
-//Wyswietlanie danych
-void display (void *data){
-  INT8U x, y;
-  INT8U counter;      //Zmianna pomocnicza licząca ilość znaków w linii niezależnie od x
-  char *msg;
-  INT8U err;
-  char text[lineSize]; //Tablica text zawierająca wszystkie znaki w linii
+//------------------------------------------------------------------------------
+//                                EDIT INPUT
+//------------------------------------------------------------------------------
 
-  data = data;
-  x = 0;
-  y = 1;
-  counter = 0;
+void edit_input(void *pdata){
+	int i;
+	INT8U post_error, pend_error, memory_error, mail_error, queue_error, error;		//ERRORS
+	INT8U char_counter=0;		//Określa ilość aktualnie wpisanych znaków
+	INT16S *received_data;
+	INT16S key;
+	char buffor[BUFFOR_SIZE] = "           ";
+	struct display_options disp_opts;
 
-  for(;;){
-    msg = (char *)OSMboxPend(Mbox, 0, &err); //Odbieramy wiadomość za pomocą funkcji
-    //OSMboxPend ze sksrzynki Mbox,
-    //0 -> oznacza, że nie ma ograniczenia czasowego na odebranie wiadomości
-    //err -> błąd
+	pdata = pdata;
 
-    if (msg[0] == 0x1B){    //ESC -> wychodzimy z programu
-      PC_DOSReturn();       //Koniec programu
-    }
-    else if (msg[0] == 8){  //Backspace -> usunięce znaku po lewej stronie kursora
-      if(x != 0){           //Sprawdzamy czy x znaku nie znajduje się na współrzędnej x
-        x--;                //Zmniejszamy współrzędną x
-        text[x] = '\0';     //Czyścimy daną komórkę tablicy text
-        PC_DispStr(x, 21, " ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-        counter--;
-      }
-    }
-    else if (msg[0] == 0x2E){ //Delete -> Czyścimy linię
-      while (x>0){            //Dopóki x jest większe od 0 -> istnieją jakieś znaki w linii
-        x--;                  //Zmniejszamy x -> przesuwamy się w lewo
-        text[x] = '\0';
-        PC_DispStr(x, 21, " ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-        counter--;
-      }
-    }
-    else if (msg[0] == 13){ //Enter przenosimy linię
-      if (x != 0){
-        text[x] = '\0';
-        PC_DispStr(0, y, text, DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-        y++;
-        if (y==5) y=1; //ile linii można zapisać
+	buffor[BUFFOR_SIZE - 1] = '\0';	//Koniec buffer jest pusty
 
-        while (x!=0){
-          text[x] = '\0';
-          x--;
-          PC_DispStr(x, 21, " ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
-        }
-        counter = 0;
-      }
-    }
-    else{ //Inne znaki
-      if (counter < lineSize){
-        PC_DispChar(x, 21, (char) *msg, DISP_FGND_RED + DISP_BGND_LIGHT_GRAY);
-        text[x] = (char)msg[0]; //Rzutujemy msg[0] na char
-        x++;
-        counter++;
-      }
-      else{
-        counter=lineSize;
-      }
-    }
-    OSTimeDly(1);
-  }
+	//Opcje do wyświetlenia wpisywanych danych
+	disp_opts.x = 4;
+	disp_opts.y = 0;
+	disp_opts.mode = EDIT_BAR;
+
+	while(1){
+		received_data = OSQPend(input_queue, 0, &pend_error);	 //Pobieramy received_data z kolejki, czyli wskaznik
+		//wiadomosci, stosujac * pobieramy jego wartość
+		key = *received_data;
+		OSMemPut(input_memory, received_data);	//received_data to jednocześnie adres bloku pamięci wejściowej,
+		//która w tym momencie może zostać zwolniona
+
+		//Na podstawie key wykonujemy odpowiednie funkcje
+		switch(key){
+			case ESCAPE:				//Escape
+				PC_DOSReturn();
+				break;
+			case BACKSPACE:				//Backaspace
+				//Jeżeli istnieją jakieś znaki to można je usunąć
+				if (char_counter > 0){
+					buffor[char_counter-1] = ' ';
+					char_counter -= 1;
+				}
+				break;
+			case DELETE:				//Delete
+				//Usuwamy wszystkie znaki
+				while(char_counter >0){
+					buffor[char_counter-1] = ' ';
+					char_counter -= 1;
+				}
+				break;
+			case ENTER:				//Enter
+				//ustawiamy load dla każdego zadania
+				set_mailbox_load(buffor);
+				//OSQFlush(queue);
+				set_queue_load(buffor);
+				handle_semaphore(buffor);
+
+				//Po zakończeniu usuwamy całą linię danych
+				while(char_counter >0){
+					buffor[char_counter-1] = ' ';
+					char_counter -= 1;
+				}
+				break;
+			default:				//ladowanie danych do bufora
+				if (char_counter < BUFFOR_SIZE-1){
+					buffor[char_counter] = key;
+					char_counter += 1;
+				}
+				break;
+		}
+
+		//Opcje do wyświetlenia wpisywanych danych
+		strcpy(disp_opts.str, buffor);
+		disp_opts.size = BUFFOR_SIZE;
+
+		//Przesłanie danych za pomocą kolejki
+		post_error = OSQPost(main_queue, &disp_opts);
+
+		//Obsługa błędów
+		if (post_error == OS_MBOX_FULL) PC_DispStr(50, 5, "OS_MBOX_FULL", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+		else if (post_error == OS_ERR_EVENT_TYPE) 		PC_DispStr(0, 1, "OS_ERR_EVENT_TYPE", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+		else if (post_error == OS_ERR_PEVENT_NULL) 		PC_DispStr(0, 1, "OS_ERR_PEVENT_NULL", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+		else if (post_error == OS_ERR_POST_NULL_PTR) 	PC_DispStr(0, 1, "OS_ERR_POST_NULL_PTR", DISP_FGND_YELLOW + DISP_BGND_BLUE);
+	}
+}
+
+//------------------------------------------------------------------------------
+//                               LOADED TASKS
+//------------------------------------------------------------------------------
+
+/*
+Poniżej znajdują się funkcje zadań obciążających dla Mbox'ów, kolejek oraz semaforów.
+*/
+
+void mailbox_task(void *data){
+	display_options disp_opts;
+	task_parameters *mailbox_task_params = 0;
+
+	char task_number;
+	INT8U memory_error;
+	int i;
+	INT32U load=255;
+	INT32U load_iterator;
+	INT32U counter=0;
+	INT32U k=0;
+
+	task_number = *(INT8U*)data;
+
+	//Opcje do wyświetlenia
+	disp_opts.task_number = task_number;
+	disp_opts.mode = TASK_INFO;
+
+	while(1){
+		//Pobieramy parametry danej skrzynki
+		mailbox_task_params = OSMboxAccept(mailbox[task_number - 1]);
+
+		//Jesli skrzynka nie jest pusta
+		if(mailbox_task_params != NULL){
+			//Aktualizujemy load
+			load = mailbox_task_params->load;
+			OSMemPut(mailbox_task_memory, mailbox_task_params);
+		}
+
+		//Opcje do wyświetlenia
+		disp_opts.load = load;
+		disp_opts.counter = counter;
+		OSQPost(main_queue, &disp_opts);
+
+		//Pętla obciążająca
+		for(load_iterator=0; load_iterator < load; load_iterator++){
+			k++;
+		}
+		counter++;
+		OSTimeDly(1);
+	}
+
+}
+
+void queue_task(void *data){
+	OS_Q_DATA queue_data;
+	//Struktura zawiera
+	//*OSMsg -> czy kolejna wiadomosc jest dostepna
+	//OSNMsgs -> ilosc wiadomosci w kolejce
+	//OSQSize -> wielkosc wiadomosci
+	//OSEventTbl[OS_EVENT_TBL_SIZE] -> lista oczekujacych wiadomosci
+
+	display_options disp_opts;
+	task_parameters *queue_task_params = 0;
+	char task_number;
+	INT8U memory_error;
+	INT32U i;
+	INT32U load=255, load_iterator;
+	INT32U k=0, counter=0;
+	boolean w_msg = true;
+
+	task_number = *(INT8U*) data + 5;
+
+	//Aktualizujemy dane do wyświetlenia
+	disp_opts.task_number = task_number;
+	disp_opts.mode = TASK_INFO;
+
+	while(1){
+		//Pobieramy informacje o kolejce
+		OSQQuery(queue, &queue_data);
+
+		w_msg = true;
+
+		//Iterujemy przez kolejne wiadomosci
+		for(i=0; i<queue_data.OSNMsgs; i++){
+			//Jezeli mamy dostepna wiadomosc w kolejce pobieramy dane
+			queue_task_params = OSQAccept(queue);
+
+			//Jesli paramtery przeslane przez kolejke nie sa puste
+			//pobieramy dane do tasku
+			if (queue_task_params != NULL){
+				//Operacja dla pierwszej wiadomosci dla danego zadania kolejki
+				if(queue_task_params->task_number == task_number && w_msg == true){
+					w_msg = false;
+					load = queue_task_params->load;
+					memory_error = OSMemPut(queue_task_memory, queue_task_params);
+					if(memory_error != OS_NO_ERR){
+						if(memory_error == OS_MEM_NO_FREE_BLKS){
+							PC_DispStr(61, 6 + task_number, "                    ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+							PC_DispStr(61, 6 + task_number, "2OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+						}
+						else if(memory_error == OS_MEM_INVALID_PMEM){
+							PC_DispStr(61, 6 + task_number, "                    ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+							PC_DispStr(61, 6 + task_number, "1OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+						}
+					}
+				}
+				//W przeciwnym wypadku
+				else {
+					OSQPost(queue, queue_task_params);
+				}
+			}
+		}
+
+		//Aktualizujemy dane do wyświetlenia
+		disp_opts.load = load;
+		disp_opts.counter = counter;
+
+		//Przesyłamy opcje do wyświetlenia
+		OSQPost(main_queue, &disp_opts);
+
+		//Pętla obciążająca
+		for(load_iterator=0; load_iterator<load; load_iterator++){
+			k++;
+		}
+
+		counter++;
+		OSTimeDly(1);
+	}
+}
+
+void semaphore_task(void *data){
+	display_options disp_opts;
+	char task_number;
+	INT8U semaphore_error;
+	INT32U load=255, load_iterator;
+	INT32U k=0, counter=0;
+
+	task_number = *(INT8U *)data + 10;
+
+	disp_opts.mode = TASK_INFO;
+	disp_opts.task_number = task_number;
+
+	while(1){
+
+		OSSemPend(semaphore, 0, &semaphore_error);
+		load = semaphore_load;
+		OSSemPost(semaphore);
+
+		//Opcje wyswietlania
+		disp_opts.load = load;
+		disp_opts.counter = counter;
+		OSQPost(main_queue, &disp_opts);
+
+		//Petla obciazajaca
+		for(load_iterator=0; load_iterator<load; load_iterator++){
+			k++;
+		}
+		counter++;
+		OSTimeDly(1);
+	}
+}
+
+//------------------------------------------------------------------------------
+//                            LOADERS AND HANDLER
+//------------------------------------------------------------------------------
+
+/*
+Funkcje ładujące obciążenie dla konkretnych zadań wraz z obsługą odpowiednich
+błędów.
+*/
+
+//Funkcja ustawiajaca load dla mailboxa
+void set_mailbox_load(void *data){
+	int i;
+	INT8U memory_error, mail_error, error;		//ERRORS
+	INT32U value;
+
+	task_parameters *mailbox_params;
+
+	value = strtoul(data, NULL, 10);
+
+	//MAILBOX
+	for(i=0; i<5; i++){
+		mailbox_params = OSMemGet(mailbox_task_memory, &memory_error);
+		if(memory_error != OS_NO_ERR){
+			if(memory_error == OS_MEM_NO_FREE_BLKS){
+				PC_DispStr(61,  7 + i, "                     ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(61,  7 + i, "3OS_MEM_NO_FREE_BLKS", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
+			else if(memory_error == OS_MEM_INVALID_PMEM){
+				PC_DispStr(61,  7 + i, "                     ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(61,  7 + i, "OS_MEM_INVALID_PMEM", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
+		}
+		mailbox_params -> load = value;
+		mail_error = OSMboxPost(mailbox[i], mailbox_params);
+
+		if(mail_error == OS_MBOX_FULL){ //W przypadku zapełnionej skrzynki
+			PC_DispStr(69, 7 + i, "           ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(69, 7 + i, " MBOX_FULL ", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		if(mail_error == OS_NO_ERR){
+				PC_DispStr(69, 7 + i, "           ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(69, 7 + i, " STATUS_OK ", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+	}
+}
+
+//Funkcja ustawiajaca load dla zadania kolejki
+void set_queue_load(void *data){
+	int i;
+	INT8U memory_error, queue_error;		//ERRORS
+	INT32U value;
+
+	task_parameters *queue_params;
+
+	value = strtoul(data, NULL, 10);
+
+	//QUEUE
+	for(i=0; i<5; i++){
+		queue_params = OSMemGet(queue_task_memory, &memory_error);
+		if(memory_error != OS_NO_ERR){
+			if(memory_error == OS_MEM_NO_FREE_BLKS){
+				PC_DispStr(60, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(60, 12 + i, "4OS_MEM_NO_FREE_BLKS", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
+			else if (memory_error == OS_MEM_INVALID_PMEM){
+				PC_DispStr(62, 12 + i, "            ", 	DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(62, 12 + i, "OS_MEM_INVALID_PMEM", 		DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
+		}
+		//Aktulizacja load i task_number
+		queue_params -> load = value;
+		queue_params -> task_number = i+6;
+		queue_error = OSQPost(queue, queue_params);
+		if(queue_error == OS_Q_FULL){	//W przypadku pełnej kolejki
+			PC_DispStr(70, 12 + i, "       ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(70, 12 + i, "Q_FULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			queue_params = OSQPend(queue, 0, &queue_error);//Opróżnaimy kolejkę
+			OSMemPut(queue_task_memory, queue_params);
+			queue_error = OSQPost(queue, queue_params);//ładujemy aktualne dane
+			if (queue_error == OS_NO_ERR){
+				PC_DispStr(70, 12 + i, "         ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+				PC_DispStr(70, 12 + i, "STATUS_OK", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			}
+		}
+	}
+}
+
+//Funkcja ładująca obciążenie dla zadnia semafora
+void handle_semaphore(void *data){
+	INT8U semaphore_error;
+
+	semaphore_load = strtoul(data, NULL, 10);
+
+	OSSemPend(semaphore, 0, &semaphore_error);
+
+	if(semaphore_error != OS_NO_ERR){
+		if(semaphore_error == OS_TIMEOUT){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_TIMEOUT", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_EVENT_TYPE){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_EVENT_TYPE", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_PEND_ISR){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_PEND_ISR", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_PEVENT_NULL){
+			PC_DispStr(67, 22, "                   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_PEVENT_NULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+	}
+
+	semaphore_error = OSSemPost(semaphore);
+
+	if(semaphore_error != OS_NO_ERR){
+		if(semaphore_error == OS_TIMEOUT){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_TIMEOUT", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_SEM_OVF){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_SEM_OVF", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_EVENT_TYPE){
+			PC_DispStr(67, 22, "                 ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_EVENT_TYPE", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+		else if(semaphore_error == OS_ERR_PEVENT_NULL){
+			PC_DispStr(67, 22, "                   ", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+			PC_DispStr(67, 22, "OS_ERR_PEVENT_NULL", DISP_FGND_BLACK + DISP_BGND_LIGHT_GRAY);
+		}
+	}
 }
